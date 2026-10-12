@@ -18,13 +18,13 @@ all: $(BUILD)/FNDISK.COM $(BUILD)/fndisk-cpm.h8d
 
 $(BUILD)/resident.bin: $(FNDISK_SRC)/resident.asm $(FNDISK_SRC)/h89.inc
 	@mkdir -p $(BUILD)
-	$(Z80ASM) -b -g -m -I=$(FNDISK_SRC) -r=$(FNDISK_ORG) -o=$@ $<
+	$(Z80ASM) -b -g -m -I=$(FNDISK_SRC) -O=$(BUILD) -r=$(FNDISK_ORG) -o=$@ $<
 	@size=$$(stat -c %s $@); room=$$(( 0x10000 - $(FNDISK_ORG) )); \
 	  echo "resident: $$size bytes at $(FNDISK_ORG), room for $$room"; \
 	  test $$size -le $$room || { echo "resident part doesn't fit" >&2; exit 1; }
 
 $(BUILD)/FNDISK.COM: $(FNDISK_SRC)/loader.asm $(FNDISK_SRC)/h89.inc $(BUILD)/resident.bin
-	$(Z80ASM) -b -m -I=$(FNDISK_SRC) -I=$(BUILD) -r=0x100 -o=$@ $<
+	$(Z80ASM) -b -m -I=$(FNDISK_SRC) -I=$(BUILD) -O=$(BUILD) -r=0x100 -o=$@ $<
 
 # FNDISK.COM alone on a 100K H17 CP/M disk (hz89 format)
 $(BUILD)/fndisk-cpm.h8d: $(BUILD)/FNDISK.COM tools/cpm-dir-fixup.py
