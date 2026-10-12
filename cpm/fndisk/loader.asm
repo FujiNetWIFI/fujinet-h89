@@ -15,6 +15,8 @@
 ;-----------------------------------------------------------------------------
 
         include "h89.inc"
+
+TICKS           equ     0x000B  ; the Heath BIOS's 2 ms tick counter
         include "resident.def"
 
 BDOS            equ     5
@@ -72,6 +74,8 @@ start:
         jp      c,no_room
 
         call    card_on
+        call    card_present
+        jp      nz,no_card
 
         ld      hl,image
         ld      de,res_start
@@ -135,6 +139,9 @@ not_heath:
         jr      fail
 no_room:
         ld      de,msg_no_room
+        jr      fail
+no_card:
+        ld      de,msg_no_card
         jr      fail
 no_letters:
         ld      de,msg_no_letters
@@ -206,45 +213,7 @@ probe_found:
         ccf
         ret
 
-;-----------------------------------------------------------------------------
-; Start the card if nothing has yet (as FNON does), and face it toward us
-;-----------------------------------------------------------------------------
-
-card_on:
-        in      a,(PORTC)
-        and     PC_EN
-        jr      nz,card_ready
-        ld      a,0xC0          ; port A mode 2, PC0-PC2 outputs (EN goes low)
-        out     (PCTRL),a
-        ld      a,0x06          ; EN=1, IO0=1
-        out     (PORTC),a
-        ld      a,0x02          ; EN=0 with IO0 high
-        out     (PORTC),a
-        call    tick
-        call    tick
-        ld      a,0x06          ; EN=1: boots from flash
-        out     (PORTC),a
-        ld      b,100           ; about 200 ms
-card_wait:
-        call    tick
-        djnz    card_wait
-card_ready:
-        in      a,(PORTA)       ; drop anything latched while it started
-        ld      a,OE_ON
-        out     (PCTRL),a
-        ld      a,DIR_TO_H89
-        out     (PCTRL),a
-        ret
-
-; Wait for the next 2 ms tick
-tick:
-        ld      a,(TICKS)
-        ld      c,a
-tick_wait:
-        ld      a,(TICKS)
-        cp      c
-        jr      z,tick_wait
-        ret
+        include "card.inc"
 
 ;-----------------------------------------------------------------------------
 ; Which image is in each drive now
@@ -344,6 +313,7 @@ msg_no_room:    defm    "No room above the BIOS. Make a 62K system", 13, 10
                 defm    "(MOVCPM17 62 *, then SYSGEN) and boot that.", 13, 10, "$"
 msg_no_letters: defm    "No 8 free drive letters there.", 13, 10, "$"
 msg_no_fujinet: defm    "The FujiNet isn't answering.", 13, 10, "$"
+msg_no_card:    defm    "No FujiNet card (82C55 at 0D0H) found.", 13, 10, "$"
 msg_drive:      defm    "  "
 msg_letter:     defm    "x: slot "
 msg_slotno:     defm    "n  $"
