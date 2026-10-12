@@ -13,9 +13,6 @@ DIR_TO_H89      equ     0x00    ; port C bit set/reset: PC0=0, the 245 drives to
 DIR_TO_ESP      equ     0x01    ; PC0=1, toward the ESP32
 OE_ON           equ     0x02    ; PC1=0, the 245 enabled
 
-; The 2 ms clock tick counter the Heath BIOS keeps
-TICKS           equ     0x000B
-
 ; SLIP
 SLIP_END        equ     0xC0
 SLIP_ESC        equ     0xDB

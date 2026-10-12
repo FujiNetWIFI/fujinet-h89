@@ -16,6 +16,8 @@
 
         include "h89.inc"
 
+TICKS           equ     0x000B  ; the Heath BIOS's 2 ms tick counter
+
         public  res_start, res_end
         public  first_drive
         public  hooks, bios_jumps, bios_seldsk, NHOOKS, do_seldsk
@@ -23,9 +25,6 @@
         public  fuji_call, req_dev, req_cmd, req_desc, req_aux, req_auxn
         public  req_data, req_dlen, rep_dlen, buf
 
-TX_TIMEOUT      equ     500     ; 1 s for the ESP32 to take a byte
-RX_FIRST        equ     7500    ; 15 s for the reply to start (TNFS can be slow)
-RX_TIMEOUT      equ     500     ; 1 s between reply bytes
 
 res_start:
         defm    "FNDISK"
@@ -155,92 +154,7 @@ run:
 jp_hl:
         jp      (hl)
 
-;-----------------------------------------------------------------------------
-; Login: only a slot the FujiNet has mounted, holding an H17 image, is a
-; drive. That keeps CP/M off the FujiNet's own boot image and off slots
-; CONFIG has emptied. Returns A = 0 when the drive can be used.
-;-----------------------------------------------------------------------------
-
-login:
-        ld      a,0xFF
-        ld      (cache_slot),a  ; buf is used below
-
-        ld      a,DEV_FUJI
-        ld      (req_dev),a
-        ld      a,CMD_DEVICE_SLOTS
-        ld      (req_cmd),a
-        xor     a
-        ld      (req_desc),a
-        ld      (req_auxn),a
-        ld      hl,0
-        ld      (req_dlen),hl
-        ld      hl,SLOTS_SIZE
-        ld      (rep_dlen),hl
-        call    fuji_call
-        ret     nz
-
-        ld      hl,buf+1        ; the mode byte of slot 0's entry
-        ld      de,SLOT_SIZE
-        ld      a,(slot)
-login_entry:
-        or      a
-        jr      z,login_mode
-        add     hl,de
-        dec     a
-        jr      login_entry
-login_mode:
-        ld      a,(hl)
-        and     MODE_MOUNTED
-        jr      z,login_no
-
-        ld      a,CMD_DEVICE_PATH
-        ld      (req_cmd),a
-        ld      a,FIELDS_U8
-        ld      (req_desc),a
-        ld      (req_auxn),a
-        ld      a,(slot)
-        ld      (req_aux),a
-        ld      hl,256
-        ld      (rep_dlen),hl
-        call    fuji_call
-        ret     nz
-
-        ld      hl,buf
-        ld      bc,256
-        xor     a
-        cpir                    ; to just past the name's NUL
-        jr      nz,login_no
-        dec     hl
-        ld      de,buf+4
-        push    hl
-        or      a
-        sbc     hl,de
-        pop     hl
-        jr      c,login_no      ; shorter than ".h8d"
-        dec     hl
-        ld      a,(hl)
-        and     0xDF
-        cp      'D'
-        jr      nz,login_no
-        dec     hl
-        ld      a,(hl)
-        cp      '8'
-        jr      nz,login_no
-        dec     hl
-        ld      a,(hl)
-        and     0xDF
-        cp      'H'
-        jr      nz,login_no
-        dec     hl
-        ld      a,(hl)
-        cp      '.'
-        jr      nz,login_no
-        xor     a
-        ret
-login_no:
-        ld      a,1
-        or      a
-        ret
+        include "login.inc"
 
 ;-----------------------------------------------------------------------------
 ; Records
@@ -278,49 +192,7 @@ locate:
         ld      (lba),hl
         ret
 
-; Have FujiNet sector (lba) of the slot in buf. Z when it's there.
-load_sector:
-        ld      a,(cache_slot)
-        ld      b,a
-        ld      a,(slot)
-        cp      b
-        jr      nz,load_miss
-        ld      hl,(cache_lba)
-        ld      de,(lba)
-        or      a
-        sbc     hl,de
-        ret     z
-load_miss:
-        ld      a,0xFF
-        ld      (cache_slot),a
-        ld      a,CMD_READ
-        call    disk_request
-        ld      hl,0
-        ld      (req_dlen),hl
-        ld      hl,SECTOR
-        ld      (rep_dlen),hl
-        call    fuji_call
-        ret     nz
-        ld      a,(slot)
-        ld      (cache_slot),a
-        ld      hl,(lba)
-        ld      (cache_lba),hl
-        xor     a
-        ret
-
-; A request for the slot's disk device: command A, sector (lba)
-disk_request:
-        ld      (req_cmd),a
-        ld      a,(slot)
-        add     a,DEV_DISK
-        ld      (req_dev),a
-        ld      a,FIELDS_U16
-        ld      (req_desc),a
-        ld      a,2
-        ld      (req_auxn),a
-        ld      hl,(lba)
-        ld      (req_aux),hl
-        ret
+        include "sector.inc"
 
 read_record:
         call    locate
@@ -366,288 +238,7 @@ record_error:
         ld      a,1
         ret
 
-;-----------------------------------------------------------------------------
-; FujiBus
-;
-; fuji_call sends the request in req_* (and req_dlen bytes from req_data),
-; then takes the reply: its header into rep_hdr, up to rep_dlen bytes of data
-; into buf. Z and A = 0 on an ACK of exactly rep_dlen bytes with a good
-; checksum; NZ otherwise, after a timeout too. The whole reply is always
-; read, to its closing END, so the next request starts clean.
-;-----------------------------------------------------------------------------
-
-fuji_call:
-        ld      (abort_sp),sp
-
-        ld      a,(req_auxn)
-        add     a,6
-        ld      l,a
-        ld      h,0
-        ld      de,(req_dlen)
-        add     hl,de
-        ld      (req_len),hl
-
-        xor     a
-        ld      (req_cks),a
-        ld      d,a
-        ld      hl,req_dev
-        ld      a,(req_auxn)
-        add     a,6
-        ld      c,a
-        ld      b,0
-        call    cksum
-        ld      hl,(req_data)
-        ld      bc,(req_dlen)
-        call    cksum
-        ld      a,d
-        ld      (req_cks),a
-
-        ; Send: one END, the packet, one END
-        ld      a,OE_ON
-        out     (PCTRL),a
-        ld      a,DIR_TO_ESP
-        out     (PCTRL),a
-        ld      hl,TX_TIMEOUT
-        ld      (tlimit),hl
-        ld      a,SLIP_END
-        call    putc
-        ld      hl,req_dev
-        ld      a,(req_auxn)
-        add     a,6
-        ld      c,a
-        ld      b,0
-        call    slip_send
-        ld      hl,(req_data)
-        ld      bc,(req_dlen)
-        call    slip_send
-        ld      a,SLIP_END
-        call    putc
-        call    tx_wait
-        ld      a,DIR_TO_H89
-        out     (PCTRL),a
-
-        ; Receive: skip to an END, past any more, then decode to the next
-        ld      hl,RX_FIRST
-        ld      (tlimit),hl
-rx_sync:
-        call    getc
-        cp      SLIP_END
-        jr      nz,rx_sync
-        ld      hl,RX_TIMEOUT
-        ld      (tlimit),hl
-rx_skip:
-        call    getc
-        cp      SLIP_END
-        jr      z,rx_skip
-        ld      hl,0
-        ld      (rx_count),hl
-rx_loop:
-        cp      SLIP_END
-        jr      z,rx_done
-        cp      SLIP_ESC
-        jr      nz,rx_store
-        call    getc
-        cp      SLIP_ESC_END
-        jr      nz,rx_esc_esc
-        ld      a,SLIP_END
-        jr      rx_store
-rx_esc_esc:
-        cp      SLIP_ESC_ESC
-        jr      nz,rx_store
-        ld      a,SLIP_ESC
-rx_store:
-        call    store
-        call    getc
-        jr      rx_loop
-
-rx_done:
-        ld      hl,(rx_count)   ; as long as its header says
-        ld      de,(rep_hdr+2)
-        or      a
-        sbc     hl,de
-        jr      nz,rx_bad
-        ld      hl,(rx_count)   ; with the data asked for
-        ld      de,6
-        or      a
-        sbc     hl,de
-        jr      c,rx_bad
-        ld      de,(rep_dlen)
-        or      a
-        sbc     hl,de
-        jr      nz,rx_bad
-        ld      a,(req_dev)     ; from the device asked
-        ld      hl,rep_hdr
-        cp      (hl)
-        jr      nz,rx_bad
-        ld      a,(rep_hdr+1)   ; an ACK
-        cp      REPLY_ACK
-        jr      nz,rx_bad
-        ld      a,(rep_hdr+4)   ; and its checksum right
-        ld      (rx_cks),a
-        xor     a
-        ld      (rep_hdr+4),a
-        ld      d,a
-        ld      hl,rep_hdr
-        ld      bc,6
-        call    cksum
-        ld      hl,buf
-        ld      bc,(rep_dlen)
-        call    cksum
-        ld      a,(rx_cks)
-        cp      d
-        jr      nz,rx_bad
-        xor     a
-        ret
-rx_bad:
-        ld      a,1
-        or      a
-        ret
-
-; A timeout anywhere in a call: give up on it
-abort:
-        ld      a,DIR_TO_H89
-        out     (PCTRL),a
-        ld      sp,(abort_sp)
-        ld      a,1
-        or      a
-        ret
-
-; D += BC bytes from HL, as an 8-bit sum with end-around carry
-cksum:
-        ld      a,b
-        or      c
-        ret     z
-        ld      a,d
-        add     a,(hl)
-        adc     a,0
-        ld      d,a
-        inc     hl
-        dec     bc
-        jr      cksum
-
-; A reply byte: the first 6 into rep_hdr, then up to rep_dlen into buf
-store:
-        push    bc
-        ld      c,a
-        ld      hl,(rx_count)
-        inc     hl
-        ld      (rx_count),hl
-        dec     hl
-        ld      de,6
-        or      a
-        sbc     hl,de
-        jr      nc,store_data
-        add     hl,de
-        ld      de,rep_hdr
-        add     hl,de
-        ld      (hl),c
-        pop     bc
-        ret
-store_data:
-        ld      de,(rep_dlen)
-        ld      a,l
-        sub     e
-        ld      a,h
-        sbc     a,d
-        jr      nc,store_done   ; more than was asked for: counted, not kept
-        ld      de,buf
-        add     hl,de
-        ld      (hl),c
-store_done:
-        pop     bc
-        ret
-
-; BC bytes from HL, SLIP-escaped
-slip_send:
-        ld      a,b
-        or      c
-        ret     z
-        ld      a,(hl)
-        cp      SLIP_END
-        jr      z,slip_end
-        cp      SLIP_ESC
-        jr      z,slip_esc
-        call    putc
-        jr      slip_next
-slip_end:
-        ld      a,SLIP_ESC
-        call    putc
-        ld      a,SLIP_ESC_END
-        call    putc
-        jr      slip_next
-slip_esc:
-        ld      a,SLIP_ESC
-        call    putc
-        ld      a,SLIP_ESC_ESC
-        call    putc
-slip_next:
-        inc     hl
-        dec     bc
-        jr      slip_send
-
-; Carry set once (TICKS - t0) has reached tlimit. Uses HL, DE.
-expired:
-        ld      hl,(TICKS)
-        ld      de,(t0)
-        or      a
-        sbc     hl,de
-        ld      de,(tlimit)
-        or      a
-        sbc     hl,de
-        ccf
-        ret
-
-; Wait for the ESP32 to have taken the last byte (/OBF high). Keeps BC, DE, HL.
-tx_wait:
-        in      a,(PORTC)
-        and     PC_OBF
-        ret     nz
-        push    hl
-        push    de
-        ld      hl,(TICKS)
-        ld      (t0),hl
-tx_wait_poll:
-        in      a,(PORTC)
-        and     PC_OBF
-        jr      nz,tx_wait_done
-        call    expired
-        jr      nc,tx_wait_poll
-        jp      abort
-tx_wait_done:
-        pop     de
-        pop     hl
-        ret
-
-; Send A. Keeps BC, DE, HL.
-putc:
-        push    af
-        call    tx_wait
-        pop     af
-        out     (PORTA),a
-        ret
-
-; The next byte from the ESP32 into A. Keeps BC, DE, HL.
-getc:
-        in      a,(PORTC)
-        and     PC_IBF
-        jr      nz,getc_take
-        push    hl
-        push    de
-        ld      hl,(TICKS)
-        ld      (t0),hl
-getc_poll:
-        in      a,(PORTC)
-        and     PC_IBF
-        jr      nz,getc_ready
-        call    expired
-        jr      nc,getc_poll
-        jp      abort
-getc_ready:
-        pop     de
-        pop     hl
-getc_take:
-        in      a,(PORTA)
-        ret
+        include "fujibus.inc"
 
 ;-----------------------------------------------------------------------------
 ; Disks: Heath's H17 format, the same for every slot
@@ -695,23 +286,7 @@ offset:         defw    0
 cache_slot:     defb    0xFF    ; slot whose sector cache_lba is in buf; FF = none
 cache_lba:      defw    0
 
-; The request as it goes out: header, then the aux bytes
-req_dev:        defb    0
-req_cmd:        defb    0
-req_len:        defw    0
-req_cks:        defb    0
-req_desc:       defb    0
-req_aux:        defw    0
-req_auxn:       defb    0       ; how many aux bytes
-req_data:       defw    0       ; data sent after them
-req_dlen:       defw    0
-rep_dlen:       defw    0       ; data expected back, into buf
-rep_hdr:        defs    6
-rx_count:       defw    0
-rx_cks:         defb    0
-t0:             defw    0
-tlimit:         defw    0
-abort_sp:       defw    0
+        include "fujibus-vars.inc"
 caller_sp:      defw    0
 
 alv:            defs    NDRIVES * 12
