@@ -1,6 +1,7 @@
 # FujiNet for the Heathkit H89
 #
-#   make            FNDISK.COM, and an H17 CP/M disk with it on
+#   make            FNDISK.COM, and an H17 CP/M disk with it on; FN.DVD, and
+#                   an HDOS disk with it on; FNBOOT and its stage 2
 #
 # Needs z88dk (z88dk-z80asm, z88dk-appmake) on PATH.
 
@@ -12,12 +13,20 @@ BUILD   := build
 # whose RAM ends at F711H, to the top of memory
 FNDISK_ORG ?= 0xF720
 
+# Where FNBOOT is assembled: the unused bytes at the end of MTR-90 (from
+# 0F65H in 444-142, 0F25H in 444-84); 0x1000 for an EPROM of its own; or RAM
+# clear of 2040H-BB68H, such as 0xC000
+BOOT_ORG   ?= 0x0F80
+
 FNDISK_SRC := cpm/fndisk
 FN_SRC     := hdos/fn
+BOOT_SRC   := boot
 FN_UNITS   ?= 8
 COMMON     := $(wildcard common/*.inc)
+BOOT_INC   := $(wildcard $(BOOT_SRC)/*.inc) common/h89.inc
 
-all: $(BUILD)/FNDISK.COM $(BUILD)/fndisk-cpm.h8d $(BUILD)/FN.DVD $(BUILD)/fn-hdos.h8d
+all: $(BUILD)/FNDISK.COM $(BUILD)/fndisk-cpm.h8d $(BUILD)/FN.DVD $(BUILD)/fn-hdos.h8d \
+     $(BUILD)/fnboot.bin $(BUILD)/stage2.bin
 
 $(BUILD)/resident.bin: $(FNDISK_SRC)/resident.asm $(COMMON)
 	@mkdir -p $(BUILD)
@@ -69,8 +78,43 @@ tools-disk: $(BUILD)/FNDISK.COM tools/cpm-dir-fixup.py
 	python3 -I tools/cpm-dir-fixup.py $(BUILD)/tools/disk
 	mv $(BUILD)/tools/disk $(BUILD)/fujinet-cpm.h8d
 
+# FNBOOT, for BOOT_ORG (rebuilt when that changes). In the monitor's spare
+# bytes it must end below 1000H.
+$(BUILD)/fnboot.org: FORCE
+	@mkdir -p $(BUILD)
+	@echo $(BOOT_ORG) | cmp -s - $@ || echo $(BOOT_ORG) > $@
+
+$(BUILD)/fnboot.bin: $(BOOT_SRC)/fnboot.asm $(BOOT_INC) $(BUILD)/fnboot.org
+	$(Z80ASM) -b -m -I=$(BOOT_SRC) -I=common -O=$(BUILD) -r=$(BOOT_ORG) -o=$@ $<
+	@org=$$(( $(BOOT_ORG) )); size=$$(stat -c %s $@); \
+	  printf 'fnboot: %d bytes at %04XH..%04XH, G%03o%03o\n' $$size $$org $$(( org + size - 1 )) \
+	    $$(( org >> 8 )) $$(( org & 255 )); \
+	  test $$org -ge 4096 -o $$(( org + size )) -le 4096 || { echo "FNBOOT runs past the monitor ROM" >&2; rm -f $@; exit 1; }
+
+# Stage 2, sector 0 of the boot image, with the shim it leaves under CONFIG
+$(BUILD)/shim.bin: $(BOOT_SRC)/shim.asm $(BOOT_INC)
+	@mkdir -p $(BUILD)
+	$(Z80ASM) -b -g -m -I=$(BOOT_SRC) -I=common -O=$(BUILD) -r=0x2040 -o=$@ $<
+
+$(BUILD)/stage2.bin: $(BOOT_SRC)/stage2.asm $(BOOT_INC) $(BUILD)/shim.bin
+	$(Z80ASM) -b -m -I=$(BOOT_SRC) -I=common -I=$(BUILD) -O=$(BUILD) -r=0x2280 -o=$@ $<
+	@echo "stage2: $$(stat -c %s $@) bytes (a sector is 512)"
+
+# The boot image for the FujiNet's flash (/autorun.img): stage 2, then
+# CONFIG.ABS:
+#   make autorun CONFIG_ABS=../fujinet-config/r2r/h89-hdos/config.abs
+autorun: $(BUILD)/stage2.bin tools/fnboot.py
+	@test -n "$(CONFIG_ABS)" || { echo "set CONFIG_ABS=path/to/config.abs" >&2; exit 1; }
+	python3 -I tools/fnboot.py image $(BUILD)/stage2.bin $(CONFIG_ABS) -o $(BUILD)/autorun.img
+
+# FNBOOT in a copy of the monitor ROM, at BOOT_ORG:
+#   make monitor-rom MTR=path/to/2732_444-142_mtr90.u518
+monitor-rom: $(BUILD)/fnboot.bin tools/fnboot.py
+	@test -n "$(MTR)" || { echo "set MTR=path/to/the monitor ROM image" >&2; exit 1; }
+	python3 -I tools/fnboot.py patch $(MTR) $(BUILD)/fnboot.bin --at $(BOOT_ORG) -o $(BUILD)/monitor-fnboot.rom
+
 # The host tools, with no emulator
-check:
+check: $(BUILD)/stage2.bin $(BUILD)/fnboot.bin
 	tests/host-tools.sh
 
 # CONFIG.ABS and FN.DVD on one HDOS disk:
@@ -86,4 +130,4 @@ hdos-tools-disk: $(BUILD)/FN.DVD tools/hdosfs.py
 clean:
 	rm -rf $(BUILD)
 
-.PHONY: all clean check tools-disk hdos-tools-disk
+.PHONY: all clean check tools-disk hdos-tools-disk autorun monitor-rom FORCE

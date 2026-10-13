@@ -2,8 +2,9 @@
 
 Software that runs on the H89 to use the H89-ESP32 FujiNet card (an 82C55
 at 0D0H): FNDISK for CP/M and FN.DVD for HDOS make the FujiNet's drive slots
-disks. CONFIG, which picks the images for the FujiNet's drive slots, is
-in [fujinet-config](https://github.com/FujiNetWIFI/fujinet-config) (`make h89`).
+disks, and FNBOOT starts CONFIG from the monitor, with no disk. CONFIG, which
+picks the images for the FujiNet's drive slots, is in
+[fujinet-config](https://github.com/FujiNetWIFI/fujinet-config) (`make h89`).
 
 ## FNDISK: FujiNet drives for CP/M
 
@@ -82,6 +83,71 @@ writes nothing.
 
 FNDISK and FN.DVD share their FujiBus code (`common/`).
 
+## FNBOOT: CONFIG from the FujiNet's flash
+
+FNBOOT is about 100 bytes, started with the monitor's Go. It restarts the
+ESP32, which puts the boot image it keeps in flash (`/autorun.img`) in its
+first drive slot, and boots CONFIG from that:
+
+```
+  H: Go 017200
+FujiNet boot .........................................................
+```
+
+- **Where it lives** is `BOOT_ORG` (`make BOOT_ORG=...`):
+  - `0x0F80` (the default): the unused bytes at the end of MTR-90 (444-142
+    and 444-84). `make monitor-rom MTR=2732_444-142_mtr90.u518` puts it in a
+    copy of the ROM, `build/monitor-fnboot.rom`, to burn into a 2732.
+    `G017200`.
+  - `0x1000`: an EPROM of its own, if the board decodes it there. `G020000`.
+  - RAM clear of 2040H-BB68H, such as `0xC000`. `G300000`.
+
+  The monitor takes split octal; `R` then `H` switches it to hex.
+- **The boot image** is `make autorun CONFIG_ABS=.../h89-hdos/config.abs`:
+  `build/autorun.img`. The FujiNet's firmware has to ship it as
+  `/autorun.img` for the H89. Today the H89 builds as the RS232 platform and
+  ships the MS-DOS one, and fn-h89 doesn't mount one on the H89 at all
+  (`#ifndef PINMAP_H89` in `rs232Fuji.cpp`).
+- **CONFIG returns to the monitor**, after mounting the drives (ESC) or not
+  (Q). Go again restarts the ESP32, so CONFIG comes back whatever was mounted.
+- **When it fails:**
+  - An empty slot: a bell and the monitor's prompt. Go then RETURN tries
+    again.
+  - A bad sector: stage 2 says so (`bad boot sector`, `read error`), then
+    the same.
+  - No card, or no answer: it waits, with no timeout; SHIFT+RESET.
+- Needs 48K, and an MTR-88, MTR-89 or MTR-90 monitor: it uses the monitor's
+  delay routine (002BH), RST 38H vector (2031H) and 2 ms tick (201BH).
+
+### How it works
+
+FNBOOT does as little as it can: it sends one fixed request (READ sector 0
+of device 31H), SLIP-decodes the reply to 227AH so that the sector lands at
+2280H, and jumps there if it got all 512 bytes. It doesn't check the
+checksum or time out.
+
+Sector 0 is stage 2 (`boot/stage2.asm`), and `tools/fnboot.py` puts
+`CONFIG.ABS` after it. Stage 2:
+
+1. Checks its own reply.
+2. Sets the card's setup mark, so CONFIG leaves the card alone.
+3. Loads CONFIG to 2A80H, last sector first. Each reply's header lands
+   below its sector, in space that's loaded next.
+4. Runs CONFIG in HDOS's place.
+
+CONFIG makes only four HDOS calls (`.SCIN`, `.SCOUT`, `.CONSL`, `.EXIT`).
+`boot/shim.asm` answers them from 2040H, through the monitor's RST 38H
+vector, with the console's 8250 polled. The monitor's own 2 ms tick is at
+201BH, where HDOS keeps its own.
+
+Two things the monitor needs, which stage 2 sees to:
+
+- **The HALT check.** Stage 2 sets bit 7 of the monitor's MFLAG (2008H).
+  Otherwise every tick enters the monitor if the byte before the PC is
+  76H, and an instruction that only ends in one (`LD A,'v'`) trips it.
+- **A clean command line.** It zeroes 2100H-227FH, which z88dk's HDOS
+  start-up reads as a command line.
+
 ## Building
 
 Needs z88dk (`z88dk-z80asm`, `z88dk-appmake`) on PATH.
@@ -93,6 +159,10 @@ make tools-disk CONFIG=../fujinet-config/r2r/h89-cpm/config.com
                         # build/fujinet-cpm.h8d: CONFIG.COM and FNDISK.COM
 make hdos-tools-disk CONFIG_ABS=../fujinet-config/r2r/h89-hdos/config.abs
                         # build/fujinet-hdos.h8d: CONFIG.ABS and FN.DVD
+make autorun CONFIG_ABS=../fujinet-config/r2r/h89-hdos/config.abs
+                        # build/autorun.img: FNBOOT's boot image
+make monitor-rom MTR=.../2732_444-142_mtr90.u518
+                        # build/monitor-fnboot.rom: MTR-90 with FNBOOT in it
 make check              # the host tools' tests (no emulator)
 ```
 
@@ -133,6 +203,20 @@ host that the copy is in the image byte for byte and that HDOS put the
 driver where it should; then it tries a read-only image, an empty slot and
 an image that isn't an H17 disk. `CONFIG.ABS` must be built with
 `-DH89_RIG_KEYS` (`CFLAGS_EXTRA_H89-HDOS`).
+
+For FNBOOT:
+
+```
+tests/fnboot-e2e.sh --config CONFIG.ABS
+```
+
+The emulator only takes stock ROMs, so this puts FNBOOT in RAM at 0C000H
+with the debugger and types `G300000`. The FujiNet gets the boot image in
+its flash: CONFIG has to come up, and ESC has to bring back the monitor.
+Then, with no image, Go has to come straight back. Any HDOS `CONFIG.ABS`
+does (the rig presses a real ESC here). The emulator's FujiNet keeps
+running when EN drops, so only real hardware shows the restart bringing
+the image back.
 
 `tests/fujibus-disk-probe.py HOST PORT SD_DIR` checks the FujiNet's disk
 device directly over BoIP, against an RS232 fujinet-pc: 512-byte sectors
