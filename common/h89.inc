@@ -2,8 +2,14 @@
 
 ; 82C55 at 0D0H: port A carries the bytes, port C has the handshake
 PORTA           equ     0xD0
+PORTB           equ     0xD1    ; wired to nothing: holds SETUP_MARK
 PORTC           equ     0xD2
 PCTRL           equ     0xD3
+
+; Left in port B by whatever sets up the 82C55, as fujinet-lib's port_init
+; does. A reset makes port B an input that reads FF, and any other mode word
+; clears it or makes it an input.
+SETUP_MARK      equ     0xA5
 
 PC_OBF          equ     0x80    ; /OBF: 1 = the byte we wrote has been taken
 PC_IBF          equ     0x20    ; IBF: 1 = a byte from the ESP32 is waiting
