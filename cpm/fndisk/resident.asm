@@ -12,6 +12,9 @@
 ; The images are H17 disks (.h8d): 40 tracks of ten 256-byte sectors, laid
 ; out as Heath's CP/M lays out a hard-sectored disk, and the FujiNet serves
 ; them as 512-byte sectors. A CP/M record (128 bytes) is a quarter of one.
+;
+; It's also the list device UL1: (LIST and LISTST, while the IOBYTE says
+; LST: is UL1:): the FujiNet's printer, a line at a time.
 ;-----------------------------------------------------------------------------
 
         include "h89.inc"
@@ -21,6 +24,7 @@ TICKS           equ     0x000B  ; the Heath BIOS's 2 ms tick counter
         public  res_start, res_end
         public  first_drive
         public  hooks, bios_jumps, bios_seldsk, NHOOKS, do_seldsk
+        public  list_hook, bios_list, wboot_hook, bios_wboot
         public  dph_table, DPH_SIZE, DPH_DIRBUF
         public  fuji_call, req_dev, req_cmd, req_desc, req_aux, req_auxn
         public  req_data, req_dlen, rep_dlen, buf
@@ -28,12 +32,12 @@ TICKS           equ     0x000B  ; the Heath BIOS's 2 ms tick counter
 
 res_start:
         defm    "FNDISK"
-        defb    1               ; version
+        defb    2               ; version
 
 first_drive:
         defb    3               ; CP/M drive number of slot 1 (the loader sets it)
 
-; The loader copies these over the BIOS's HOME..WRITE entries
+; The loader copies these over the BIOS's HOME..LISTST entries
 hooks:
         jp      do_home
         jp      do_seldsk
@@ -42,7 +46,8 @@ hooks:
         jp      do_setdma
         jp      do_read
         jp      do_write
-NHOOKS  equ     7
+        jp      do_listst
+NHOOKS  equ     8
 
 ; ...and the BIOS's own entries here, so calls pass on with every register
 bios_jumps:
@@ -53,6 +58,13 @@ bios_setsec:    jp      0
 bios_setdma:    jp      0
 bios_read:      jp      0
 bios_write:     jp      0
+bios_listst:    jp      0
+
+; ...and these over its LIST and WBOOT entries, which it keeps here
+list_hook:      jp      do_list
+wboot_hook:     jp      do_wboot
+bios_list:      jp      0
+bios_wboot:     jp      0
 
 ;-----------------------------------------------------------------------------
 ; BIOS entries
@@ -241,6 +253,88 @@ record_error:
         include "fujibus.inc"
 
 ;-----------------------------------------------------------------------------
+; The list device. Characters are kept until a line ends (LF or FF), the
+; buffer fills or a program ends (WBOOT), then sent to the FujiNet's printer
+; as they are. If one doesn't go, the rest of that program's are dropped: a
+; printer that's turned off doesn't answer, and each try would wait 15 s.
+;-----------------------------------------------------------------------------
+
+LST_FIELD       equ     0xC0    ; the IOBYTE's LST: bits...
+LST_UL1         equ     0xC0    ; ...for UL1:
+
+do_listst:
+        ld      a,(3)
+        and     LST_FIELD
+        cp      LST_UL1
+        jp      nz,bios_listst
+        ld      a,0xFF          ; always ready
+        ret
+
+; C = the character
+do_list:
+        ld      a,(3)
+        and     LST_FIELD
+        cp      LST_UL1
+        jp      nz,bios_list
+        ld      a,(prn_off)
+        or      a
+        ret     nz
+        ld      hl,prn_count
+        ld      a,(hl)
+        inc     (hl)
+        ld      e,a
+        ld      d,0
+        ld      hl,prn_buf
+        add     hl,de
+        ld      (hl),c
+        ld      a,c
+        cp      10
+        jr      z,list_flush
+        cp      12
+        jr      z,list_flush
+        ld      a,e
+        cp      PRN_SIZE - 1
+        ret     c
+list_flush:
+        ld      hl,prn_send
+        jp      run
+
+; A program ending: what it printed goes out. SP can be anything here (a
+; program can jump to 0 with any stack, or none), and the BIOS sets its own.
+do_wboot:
+        ld      sp,stack_top
+        ld      a,(prn_off)
+        or      a
+        call    z,prn_send
+        xor     a
+        ld      (prn_off),a
+        ld      (prn_count),a
+        jp      bios_wboot
+
+prn_send:
+        ld      a,(prn_count)
+        or      a
+        ret     z
+        ld      l,a
+        ld      h,0
+        ld      (req_dlen),hl
+        ld      l,h
+        ld      (rep_dlen),hl
+        xor     a
+        ld      (prn_count),a
+        ld      (req_desc),a
+        ld      (req_auxn),a
+        ld      hl,CMD_WRITE * 256 + DEV_PRINTER    ; req_dev, req_cmd
+        ld      (req_dev),hl
+        ld      hl,prn_buf
+        ld      (req_data),hl
+        call    fuji_call
+        ret     z
+        ld      a,1
+        ld      (prn_off),a
+        ret
+
+;-----------------------------------------------------------------------------
 ; Disks: Heath's H17 format, the same for every slot
 ;-----------------------------------------------------------------------------
 
@@ -285,12 +379,16 @@ lba:            defw    0
 offset:         defw    0
 cache_slot:     defb    0xFF    ; slot whose sector cache_lba is in buf; FF = none
 cache_lba:      defw    0
+prn_off:        defb    0       ; a print failed: drop the rest of the program's
+prn_count:      defb    0
 
         include "fujibus-vars.inc"
 caller_sp:      defw    0
 
 alv:            defs    NDRIVES * 12
 csv:            defs    NDRIVES * 16
+PRN_SIZE        equ     64
+prn_buf:        defs    PRN_SIZE
 buf:            defs    SECTOR
                 defs    64
 stack_top:

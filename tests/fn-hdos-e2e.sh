@@ -9,11 +9,12 @@
 # -DH89_RIG_KEYS (` stands in for ESC: the rig types only printable keys).
 #
 # Session A: an image read/write: LOAD FN:, MOUNT, CAT, TYPE, RUN from it,
-# COPY onto it, DISMOUNT, MOUNT again; then on the host, the copy must be in
-# the image byte for byte, and the memory HDOS gave the driver as reckoned;
-# and CONFIG must still run with the driver in.
-# Session B: read only, and the errors: an empty slot and a slot holding
-# something that isn't an H17 disk.
+# COPY onto it, print a file on LP:, DISMOUNT, MOUNT again; then on the host,
+# the copy must be in the image byte for byte, the printer must have the file
+# as LP: puts it, and the memory HDOS gave each driver must be as reckoned;
+# and CONFIG must still run with the drivers in.
+# Session B: read only, and the errors: an empty slot, a slot holding
+# something that isn't an H17 disk, and printing with the printer off.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -36,9 +37,23 @@ hdosfs() { python3 -I "${ROOT}/tools/hdosfs.py" "$@"; }
 if [[ -n "${KEEP}" ]]; then WORK="${KEEP}"; rm -rf "${WORK}"; mkdir -p "${WORK}"
 else WORK="$(mktemp -d "${TMPDIR:-/tmp}/fn-hdos-e2e-XXXXXX")"; trap 'rm -rf "${WORK}"' EXIT; fi
 
-# SY1: holds CONFIG
+# The FujiNet's own files in HOME, with its printer on as RAW (every byte to
+# SD/paper). The emulator's fnconfig.ini has the printer off, and is copied
+# in, with the rest, only where there's no fnconfig.ini yet.
+printer_on() {
+    local out="${FUJINET_LIB_DIR:-${RIG}/tools/fujinet/work/out}" fn="$1/data/fujinet"
+    mkdir -p "${fn}"
+    cp -r "${out}/fnconfig.ini" "${out}/data" "${out}/SD" "${fn}/"
+    sed -i 's/^printer_enabled=0$/printer_enabled=1/' "${fn}/fnconfig.ini"
+    printf '\n[Printer1]\ntype=0\n' >> "${fn}/fnconfig.ini"
+}
+
+# SY1: holds CONFIG, and a file to print: tabs, and a line longer than a
+# packet
+printf 'Printed through LP:\n\tA tab\nAB\tC\n%s\n' "$(printf '0123456789%.0s' {1..30})" > "${WORK}/print.txt"
 hdosfs blank "${WORK}/tools.h8d" --label TOOLS
 hdosfs put "${WORK}/tools.h8d" "${CONFIG}" --name CONFIG.ABS
+hdosfs put "${WORK}/tools.h8d" "${WORK}/print.txt" --name PRINT.TXT
 
 # The test image: a text file and a program
 mkdir -p "${WORK}/asm"
@@ -60,7 +75,7 @@ screen() { sed -n '/---- screen ----/,/^\(\[fujinet\] \)\?----------------/p' "$
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
 # --- Session A: read/write ---
-mkdir -p "${WORK}/a/data/fujinet/SD"
+printer_on "${WORK}/a"
 cp "${WORK}/test.h8d" "${WORK}/a/data/fujinet/SD/TEST.H8D"
 mapfile -t BOOT_A < <(boot)
 "${RUN}" --roms "${RIG}/tools/roms" --home "${WORK}/a" --timeout 90 "${BOOT_A[@]}" \
@@ -71,12 +86,14 @@ mapfile -t BOOT_A < <(boot)
     --until 'TEST.H8D' --wait 1500 --type '`' --until 'Mount drives' --wait 1500 --type '`' \
     --until 'FUJINET DRIVES' --prompt '>' --wait 500 \
     --type 'LOAD FN:\r' --wait 3000 --prompt '>' --debug 'mem 0x20d0 2' \
+    --type 'LOAD LP:\r' --wait 3000 --prompt '>' --debug 'mem 0x20d0 2' \
     --type 'STAT\r' --wait 2000 --prompt '>' \
     --type 'MOUNT FN0:\r' --until 'MOUNTED ON FN0:' --prompt '>' \
     --type 'CAT FN0:\r' --until 'HELLO' --prompt '>' \
     --type 'TYPE FN0:HELLO.TXT\r' --until 'THE SECOND LINE' --prompt '>' \
     --type 'RUN FN0:HELLO.ABS\r' --until 'HELLO FROM FN0' --prompt '>' \
     --type 'COPY FN0:PIP.ABS=SY0:PIP.ABS\r' --wait 3000 --prompt '>' \
+    --type 'COPY LP:=SY1:PRINT.TXT\r' --wait 2000 --prompt '>' \
     --type 'DISMOUNT FN0:\r' --until 'DISMOUNTED' --prompt '>' \
     --type 'MOUNT FN0:\r' --until 'MOUNTED ON FN0:' --prompt '>' \
     --type 'CAT FN0:\r' --until 'PIP' --prompt '>' --wait 500 --screen \
@@ -94,7 +111,7 @@ echo "PASS: PIP.ABS copied through FN0: is in the image byte for byte"
 
 # HDOS loads the driver just under its lower bound, its end page-aligned, its units' GRTs above
 mapfile -t SYSM < <(grep -A1 -- '---- mem 0x20d0 2' "${WORK}/a.log" | grep -oE '20D0 +[0-9A-F]{2} [0-9A-F]{2}' | awk '{print $3$2}')
-python3 -I - "${ROOT}/build/FN.DVD" "${SYSM[0]}" "${SYSM[1]}" <<'EOF'
+python3 -I - "${ROOT}/build/FN.DVD" "${SYSM[0]}" "${SYSM[1]}" "${ROOT}/build/LP.DVD" "${SYSM[2]}" <<'EOF'
 import sys
 d = open(sys.argv[1], 'rb').read()
 before, after = int(sys.argv[2], 16), int(sys.argv[3], 16)
@@ -104,7 +121,29 @@ want = end - dvl
 print('S.SYSM %04X -> %04X (driver %d bytes, %d units): expected %04X' % (before, after, dvl, mnu, want))
 if after != want:
     sys.exit('FAIL: HDOS put the driver at %04X, not %04X' % (after, want))
-print('PASS: the driver loaded where expected')
+# A character device has no GRTs: the driver goes just under the bound
+d = open(sys.argv[4], 'rb').read()
+before, after = after, int(sys.argv[5], 16)
+dvl = (d[4] | d[5] << 8) - 0x200
+want = before - dvl
+print('S.SYSM %04X -> %04X (LP: driver %d bytes): expected %04X' % (before, after, dvl, want))
+if after != want:
+    sys.exit('FAIL: HDOS put LP: at %04X, not %04X' % (after, want))
+print('PASS: the drivers loaded where expected')
+EOF
+
+# LP: ends lines with CR LF, spaces out tabs and drops a sector's padding
+python3 -I - "${WORK}/print.txt" "${WORK}/a/data/fujinet/SD/paper" <<'EOF'
+import sys
+text = open(sys.argv[1], 'rb').read().decode('ascii')
+want = text.expandtabs(8).replace('\n', '\r\n').encode('ascii')
+try:
+    paper = open(sys.argv[2], 'rb').read()
+except FileNotFoundError:
+    sys.exit('FAIL: the printer got nothing')
+if paper != want:
+    sys.exit('FAIL: the printer got %r, not %r' % (paper, want))
+print('PASS: printed on LP: as expected (%d bytes)' % len(paper))
 EOF
 
 # --- Session B: read only, and the errors ---
@@ -127,6 +166,9 @@ mapfile -t BOOT_B < <(boot)
     --type 'CAT FN0:\r' --until 'HELLO' --prompt '>' \
     --type 'COPY FN0:X.ABS=SY0:PIP.ABS\r' --wait 3000 --prompt '>' \
     --type 'DISMOUNT FN0:\r' --until 'DISMOUNTED' --prompt '>' --wait 500 --screen \
+    --type 'COPY LP:=SY1:PRINT.TXT\r' --until 'WRITE FAILURE' --prompt '>' \
+    --type 'MOUNT FN0:\r' --wait 3000 --prompt '>' \
+    --type 'CAT FN0:\r' --wait 2000 --prompt '>' --wait 500 --screen \
     > "${WORK}/b.log" 2>&1 || { grep -E 'timed out' "${WORK}/b.log" >&2 || true; screen "${WORK}/b.log" | tail -30 >&2; fail "session B stopped"; }
 OUT="$(screen "${WORK}/b.log")"
 echo "${OUT}" | tail -22
@@ -136,3 +178,10 @@ grep -A1 'MOUNT FN2:' <<< "${OUT}" | grep -qi 'unable to read' || fail "MOUNT FN
 grep -A2 'COPY FN0:X.ABS' <<< "${OUT}" | grep -qi 'incapable of write' || fail "COPY onto the read-only FN0: wasn't refused"
 [[ "$(sha256sum < "${WORK}/b/data/fujinet/SD/TEST.H8D")" == "${SUM}" ]] || fail "the read-only image changed"
 echo "PASS: read only, an empty slot and a non-disk each refused, the image untouched"
+# This FujiNet's printer is off (the emulator's default), so it doesn't
+# answer: LP: has to give up on the job, and leave FN: a clean bus
+AFTER="$(sed -n '/>COPY LP:=SY1:PRINT.TXT/,$p' <<< "${OUT}")"
+grep -qi 'write failure' <<< "${AFTER}" || fail "COPY LP: with the printer off didn't fail"
+sed -n '/>CAT FN0:/,$p' <<< "${AFTER}" | grep -q '^HELLO' || fail "FN0: didn't work after LP: gave up"
+[[ ! -s "${WORK}/b/data/fujinet/SD/paper" ]] || fail "the printer got something while it was off"
+echo "PASS: printing with the printer off fails, and FN0: works after"

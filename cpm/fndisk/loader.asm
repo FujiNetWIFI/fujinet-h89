@@ -1,5 +1,6 @@
 ;-----------------------------------------------------------------------------
-; FNDISK.COM: puts the FujiNet drive slots on CP/M drives (Heath CP/M 2.2.04)
+; FNDISK.COM: puts the FujiNet drive slots on CP/M drives (Heath CP/M 2.2.04),
+; and its printer on UL1:
 ;
 ; Copyright (C) 2026 Thomas Cherryhomes
 ; SPDX-License-Identifier: GPL-3.0-or-later
@@ -9,7 +10,8 @@
 ;   FNDISK x        slot 1 on drive x:, the rest after it
 ;
 ; Copies the resident part above the BIOS and points the BIOS jump table's
-; disk entries at it, then warm boots so CP/M starts with the new drives.
+; disk entries at it, and its LIST, LISTST and WBOOT, then sets LST: to UL1:
+; and warm boots so CP/M starts with the new drives.
 ; The resident part needs the room a 62K system leaves (MOVCPM17 62 *, then
 ; SYSGEN): the BIOS of a 64K one runs to the top of memory.
 ;-----------------------------------------------------------------------------
@@ -23,9 +25,11 @@ BDOS            equ     5
 B_CONOUT        equ     2
 B_PRINT         equ     9
 
-BIOS_VERSION    equ     0x33    ; Heath's BIOS: version byte, 04
+BIOS_WBOOT      equ     0x03    ; Heath's BIOS: its jump table entries...
+BIOS_LIST       equ     0x0F
+BIOS_VERSION    equ     0x33    ; ...version byte, 04
 BIOS_RAM_END    equ     0x4B    ; ...first byte above its RAM
-BIOS_HOME       equ     0x18    ; HOME..WRITE: 7 jump table entries
+BIOS_HOME       equ     0x18    ; HOME..LISTST: 8 entries
 BIOS_SELDSK     equ     0x1B
 BIOS_DPH0       equ     0x52    ; its first drive's DPH
 
@@ -60,6 +64,11 @@ start:
         or      a
         sbc     hl,de
         jp      z,already
+        ; Somewhere else up there: another FNDISK, where this one would go
+        ld      hl,res_start - 1
+        or      a
+        sbc     hl,de
+        jp      c,another
 
         ; Room above the BIOS?
         ld      hl,(bios)
@@ -82,13 +91,20 @@ start:
         ld      bc,image_end - image
         ldir
 
-        ; The BIOS's own HOME..WRITE entries, for the driver to pass calls on
+        ; The BIOS's own HOME..LISTST, LIST and WBOOT entries, for the driver
+        ; to pass calls on
         ld      hl,(bios)
         ld      de,BIOS_HOME
         add     hl,de
         ld      de,bios_jumps
         ld      bc,NHOOKS * 3
         ldir
+        ld      de,BIOS_LIST
+        ld      hl,bios_list
+        call    bios_entry
+        ld      de,BIOS_WBOOT
+        ld      hl,bios_wboot
+        call    bios_entry
 
         ; All drives share the BIOS's directory buffer
         ld      hl,(bios)
@@ -113,7 +129,7 @@ set_dirbuf:
         jp      c,no_letters
         ld      (first_drive),a
 
-        ; Hand the disk entries over
+        ; Hand the entries over
         ld      hl,hooks
         ex      de,hl
         ld      hl,(bios)
@@ -122,10 +138,22 @@ set_dirbuf:
         ex      de,hl
         ld      bc,NHOOKS * 3
         ldir
+        ld      de,BIOS_LIST
+        ld      hl,list_hook
+        call    hook_entry
+        ld      de,BIOS_WBOOT
+        ld      hl,wboot_hook
+        call    hook_entry
+
+        ld      a,(3)           ; LST: = UL1:, the FujiNet's printer
+        or      0xC0
+        ld      (3),a
 
         ld      de,msg_installed
         call    print
         call    list_drives
+        ld      de,msg_printer
+        call    print
         jp      0
 
 already:
@@ -136,6 +164,9 @@ already:
 
 not_heath:
         ld      de,msg_not_heath
+        jr      fail
+another:
+        ld      de,msg_another
         jr      fail
 no_room:
         ld      de,msg_no_room
@@ -211,6 +242,26 @@ probe_next:
 probe_found:
         cp      16 - NDRIVES + 1
         ccf
+        ret
+
+; Copy the BIOS's jump table entry at offset DE to HL
+bios_entry:
+        push    hl
+        ld      hl,(bios)
+        add     hl,de
+        pop     de
+        jr      copy_entry
+
+; Copy the jump at HL over the BIOS's entry at offset DE
+hook_entry:
+        push    hl
+        ld      hl,(bios)
+        add     hl,de
+        ex      de,hl
+        pop     hl
+copy_entry:
+        ld      bc,3
+        ldir
         ret
 
         include "card.inc"
@@ -308,12 +359,14 @@ print:
 msg_banner:     defm    "FNDISK: FujiNet drives for H89 CP/M", 13, 10, "$"
 msg_installed:  defm    "Installed.", 13, 10, "$"
 msg_already:    defm    "Already installed.", 13, 10, "$"
+msg_another:    defm    "Another FNDISK is installed. Boot again, then run this one.", 13, 10, "$"
 msg_not_heath:  defm    "Needs Heath/Zenith CP/M 2.2.04.", 13, 10, "$"
 msg_no_room:    defm    "No room above the BIOS. Make a 62K system", 13, 10
                 defm    "(MOVCPM17 62 *, then SYSGEN) and boot that.", 13, 10, "$"
 msg_no_letters: defm    "No 8 free drive letters there.", 13, 10, "$"
 msg_no_fujinet: defm    "The FujiNet isn't answering.", 13, 10, "$"
 msg_no_card:    defm    "No FujiNet card (82C55 at 0D0H) found.", 13, 10, "$"
+msg_printer:    defm    "LST: is UL1:, the FujiNet's printer (STAT LST:=LPT: for the BIOS's).", 13, 10, "$"
 msg_drive:      defm    "  "
 msg_letter:     defm    "x: slot "
 msg_slotno:     defm    "n  $"

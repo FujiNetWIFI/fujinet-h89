@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# An HDOS 2.0 boot disk with FN.DVD on it, from the one fujinet-go-h89-desktop
-# ships: converted to .h8d, DK.DVD (the H47 driver) taken off to make room,
-# FN.DVD put on, then booted once to see HDOS take it as a device.
+# An HDOS 2.0 boot disk with FN.DVD and LP.DVD on it, from the one
+# fujinet-go-h89-desktop ships: converted to .h8d, DK.DVD (the H47 driver)
+# and TEST47.ABS taken off to make room, the drivers put on, then booted once
+# to see HDOS take them as devices.
 #
-#   tests/make-hdos-boot.sh OUT.h8d [--dvd FN.DVD] [--name FN.DVD] [--rig DIR]
+#   tests/make-hdos-boot.sh OUT.h8d [--dvd FN.DVD] [--name FN.DVD] [--lp LP.DVD] [--rig DIR]
 #
 # --name DK.DVD installs the driver as DK: (HDOS would mount it under that
 # name if it refused another).
@@ -13,13 +14,15 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT="$1"; shift
 DVD="${ROOT}/build/FN.DVD"
 NAME="FN.DVD"
+LP="${ROOT}/build/LP.DVD"
 RIG="${HOME}/Workspace/fujinet-go-h89-desktop"
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --dvd) DVD="$2"; shift 2 ;;
         --name) NAME="$2"; shift 2 ;;
+        --lp) LP="$2"; shift 2 ;;
         --rig) RIG="$2"; shift 2 ;;
-        *) echo "usage: $0 OUT.h8d [--dvd FN.DVD] [--name FN.DVD] [--rig DIR]" >&2; exit 2 ;;
+        *) echo "usage: $0 OUT.h8d [--dvd FN.DVD] [--name FN.DVD] [--lp LP.DVD] [--rig DIR]" >&2; exit 2 ;;
     esac
 done
 RUN="${RIG}/build/core/h89_session_run"
@@ -30,7 +33,9 @@ trap 'rm -rf "${WORK}"' EXIT
 
 hdosfs convert "${RIG}/tools/disks/boot/hdos-2.0.h17disk" "${WORK}/boot.h8d" >/dev/null
 hdosfs rm "${WORK}/boot.h8d" DK.DVD
+hdosfs rm "${WORK}/boot.h8d" TEST47.ABS
 hdosfs put "${WORK}/boot.h8d" "${DVD}" --name "${NAME}" --flags C0
+hdosfs put "${WORK}/boot.h8d" "${LP}" --name LP.DVD --flags C0
 hdosfs ls "${WORK}/boot.h8d" --check >/dev/null
 
 DEV="${NAME%%.*}"
@@ -44,7 +49,9 @@ cp "${WORK}/boot.h8d" "${WORK}/try.h8d"
     || { tail -20 "${WORK}/boot.log" >&2; echo "the disk didn't boot" >&2; exit 1; }
 SCREEN="$(sed -n '/---- screen ----/,/^\(\[fujinet\] \)\?----------------/p' "${WORK}/boot.log" | sed 's/^\[fujinet\] //')"
 echo "${SCREEN}"
-grep -q "^ *${DEV}" <<< "${SCREEN}" || { echo "HDOS didn't list ${DEV}:" >&2; exit 1; }
+for d in "${DEV}" LP; do
+    grep -q "^ *${d}" <<< "${SCREEN}" || { echo "HDOS didn't list ${d}:" >&2; exit 1; }
+done
 
 cp "${WORK}/boot.h8d" "${OUT}"
 echo "wrote ${OUT}"

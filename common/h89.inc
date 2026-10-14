@@ -28,8 +28,9 @@ SLIP_ESC_ESC    equ     0xDD
 ; FujiBus
 DEV_FUJI        equ     0x70
 DEV_DISK        equ     0x31    ; slot n is DEV_DISK + n
+DEV_PRINTER     equ     0x40
 CMD_READ        equ     0x52    ; 'R': one 512-byte sector
-CMD_WRITE       equ     0x57    ; 'W'
+CMD_WRITE       equ     0x57    ; 'W': a sector, or bytes to print
 CMD_DEVICE_SLOTS equ    0xF2    ; 8 x {hostSlot, mode, name[36]}
 CMD_DEVICE_PATH equ     0xDA    ; a slot's full path, 256 bytes
 REPLY_ACK       equ     0x06
