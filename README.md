@@ -2,14 +2,16 @@
 
 Software that runs on the H89 to use the H89-ESP32 FujiNet card (an 82C55
 at 0D0H): FNDISK for CP/M and FN.DVD for HDOS make the FujiNet's drive slots
-disks, and FNBOOT starts CONFIG from the monitor, with no disk. CONFIG, which
+disks, FNDISK and LP.DVD print on the FujiNet's printer, and FNBOOT starts
+CONFIG from the monitor, with no disk. CONFIG, which
 picks the images for the FujiNet's drive slots, is in
 [fujinet-config](https://github.com/FujiNetWIFI/fujinet-config) (`make h89`).
 
 ## FNDISK: FujiNet drives for CP/M
 
 `FNDISK.COM` makes the FujiNet's eight drive slots CP/M drives, D: to K:
-on an H17 system, under Heath/Zenith CP/M 2.2.04:
+on an H17 system, and its printer the list device UL1:, under Heath/Zenith
+CP/M 2.2.04:
 
 ```
 A>B:FNDISK
@@ -18,7 +20,9 @@ Installed.
   D: slot 1  GAMES.H8D (read/write)
   E: slot 2  -
   ...
+LST: is UL1:, the FujiNet's printer (STAT LST:=LPT: for the BIOS's).
 A>DIR D:
+A>PIP LST:=D:README.TXT
 ```
 
 - **Images** are H17 disks: `.h8d` files of 40 tracks of ten 256-byte
@@ -33,15 +37,29 @@ A>DIR D:
   Running it again lists the drives.
 - Mount images with CONFIG; it returns to CP/M with a warm boot, which
   logs the drives in afresh.
+- **Printing:** installing sets LST: to UL1:, the FujiNet's printer
+  ([where it goes](#where-printing-goes)), so `PIP LST:=`, ^P and
+  programs' printing go there. `STAT LST:=LPT:` gives LST: back to the
+  BIOS's printer, and `STAT LST:=UL1:` brings it back. Characters go as they
+  are, a line at a time, and what's left of a line when the program ends.
+- **If the printer doesn't answer** (it's turned off in the FujiNet's web
+  UI), the first line waits 15 s, and the rest of that program's printing
+  is dropped.
 
 ### How it works
 
 FNDISK copies its resident part to F720H and points the BIOS jump table's
-disk entries (HOME to WRITE) at it. Calls for the BIOS's drives go straight
-on; calls for a FujiNet drive are served over FujiBus: the FujiNet serves an
-image as 512-byte sectors, and a CP/M record is a quarter of one. Reads
-keep the last sector; writes go through at once. A warm boot reloads only
-the CCP and BDOS, so the jump table stays as FNDISK left it.
+disk entries (HOME to WRITE), and LIST, LISTST and WBOOT, at it. Calls for
+the BIOS's drives go straight on; calls for a FujiNet drive are served over
+FujiBus: the FujiNet serves an image as 512-byte sectors, and a CP/M record
+is a quarter of one. Reads keep the last sector; writes go through at once.
+A warm boot reloads only the CCP and BDOS, so the jump table stays as FNDISK
+left it.
+
+LIST and LISTST go to the BIOS unless the IOBYTE has LST: on UL1:. LIST
+keeps characters in a 64-byte buffer and sends them to the FujiNet's
+printer (FujiBus device 40H, `W`) at LF or FF, when the buffer fills, and at
+WBOOT, where every program ends. LISTST always says ready.
 
 ## FN.DVD: FujiNet drives for HDOS 2.0
 
@@ -81,7 +99,42 @@ an even one) is one FujiNet sector and is written without reading it first.
 A byte count of 0 is HDOS asking whether the disk is write-protected, and
 writes nothing.
 
-FNDISK and FN.DVD share their FujiBus code (`common/`).
+## LP.DVD: the FujiNet's printer for HDOS 2.0
+
+`LP.DVD` is an HDOS 2.0 device driver: LP: prints on the FujiNet's printer
+([where it goes](#where-printing-goes)).
+
+```
+>COPY LP:=FN0:README.TXT
+```
+
+- **Install it** as FN.DVD: copy `LP.DVD` (also on `build/fn-hdos.h8d`) onto
+  SY0:, then reboot. The stock HDOS 2.0 disk has no LP.DVD, so it clashes
+  with nothing; rename it (FP.DVD gives FP:) to keep a Heath LP: driver.
+  Making room for both drivers takes DK.DVD and TEST47.ABS off the stock
+  disk.
+- It prints as Heath's LP: drivers do: lines end in CR LF (HDOS's end in
+  NL alone), tabs become spaces to the next column of 8, and the NULs that
+  pad a file's last sector are dropped. Lines go a whole one at a time, and
+  what's left at CLOSE.
+- **If the printer doesn't answer** (it's turned off in the FujiNet's web
+  UI), the first line waits 15 s (CTL-C cuts it short), then the job fails
+  with *Write Failure*; the next OPEN tries again.
+- HDOS loads it on first use; it takes 1.4K, with no GRT. `LOAD LP:` loads
+  it at once. It has no SET options.
+
+FNDISK, FN.DVD and LP.DVD share their FujiBus code (`common/`).
+
+## Where printing goes
+
+The FujiNet keeps what it's sent in one file, until the Print button in its
+web UI (or `/print`) downloads it; the next line printed starts a new one.
+
+- "Use as virtual printer" has to be on. The emulator's FujiNet has it off.
+- The printer type decides the file. *file printer (RAW)* keeps every byte,
+  and so does *file printer (TRIM)*, the default, unless a line holds 9BH
+  (the Atari's end of line). *Epson 80* makes a PDF, in which FF starts a
+  page. *file printer (ASCII)* drops CR and LF, so doesn't suit the H89.
 
 ## FNBOOT: CONFIG from the FujiNet's flash
 
@@ -154,11 +207,11 @@ Needs z88dk (`z88dk-z80asm`, `z88dk-appmake`) on PATH.
 
 ```
 make                    # build/FNDISK.COM, build/fndisk-cpm.h8d,
-                        # build/FN.DVD, build/fn-hdos.h8d
+                        # build/FN.DVD, build/LP.DVD, build/fn-hdos.h8d
 make tools-disk CONFIG=../fujinet-config/r2r/h89-cpm/config.com
                         # build/fujinet-cpm.h8d: CONFIG.COM and FNDISK.COM
 make hdos-tools-disk CONFIG_ABS=../fujinet-config/r2r/h89-hdos/config.abs
-                        # build/fujinet-hdos.h8d: CONFIG.ABS and FN.DVD
+                        # build/fujinet-hdos.h8d: CONFIG.ABS, FN.DVD, LP.DVD
 make autorun CONFIG_ABS=../fujinet-config/r2r/h89-hdos/config.abs
                         # build/autorun.img: FNBOOT's boot image
 make monitor-rom MTR=.../2732_444-142_mtr90.u518
@@ -182,7 +235,10 @@ tests/fndisk-e2e.sh --boot cpm62.h8d --config CONFIG.COM
 
 The second mounts an H17 image in slot 1 with CONFIG, loads FNDISK, reads
 and writes D:, warm boots, and checks on the host that the file written is
-in the image byte for byte. `CONFIG.COM` must be built with
+in the image byte for byte. Then it prints two files on UL1: and one on
+CRT:, and checks that the FujiNet's printer (turned on, as RAW, for the
+test: its `SD/paper`) got the first two byte for byte, the end of the
+second, which has no CR LF, included. `CONFIG.COM` must be built with
 `-DH89_RIG_KEYS` (the rig types only printable keys; ` stands in for ESC):
 
 ```
@@ -190,18 +246,23 @@ make -C ../fujinet-config FUJINET_LIB=... \
   CFLAGS_EXTRA_H89-CPM="-DBUILD_H89 -DH89_RIG_KEYS" h89-cpm/r2r
 ```
 
+Changing the flags alone rebuilds nothing: remove `build/config/h89-cpm`
+(or `-hdos`) first.
+
 For HDOS:
 
 ```
-tests/make-hdos-boot.sh boot.h8d            # HDOS 2.0 with FN.DVD on SY0:
+tests/make-hdos-boot.sh boot.h8d            # HDOS 2.0 with FN.DVD and LP.DVD on SY0:
 tests/fn-hdos-e2e.sh --boot boot.h8d --config CONFIG.ABS
 ```
 
 The second mounts an image with CONFIG, then LOADs, MOUNTs, CATs, TYPEs,
-RUNs from and COPYs onto FN0:, DISMOUNTs and MOUNTs again, and checks on the
-host that the copy is in the image byte for byte and that HDOS put the
-driver where it should; then it tries a read-only image, an empty slot and
-an image that isn't an H17 disk. `CONFIG.ABS` must be built with
+RUNs from and COPYs onto FN0:, COPYs a file to LP:, DISMOUNTs and MOUNTs
+again, and checks on the host that the copy is in the image byte for byte,
+that the printer got the file as LP: puts it, and that HDOS put both
+drivers where they should; then it tries a read-only image, an empty slot,
+an image that isn't an H17 disk, and printing with the printer off (which
+has to fail, and leave FN0: working). `CONFIG.ABS` must be built with
 `-DH89_RIG_KEYS` (`CFLAGS_EXTRA_H89-HDOS`).
 
 For FNBOOT:

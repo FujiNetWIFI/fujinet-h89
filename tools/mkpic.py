@@ -24,6 +24,7 @@ import sys
 
 DELTAS = (0x0101, 0xD137)
 ENTRY = 0x200
+DT_DD = 0x01                    # DVD.CAP: a directory device
 
 
 def fail(msg):
@@ -108,11 +109,16 @@ def main():
     open(a.output, 'wb').write(out)
 
     code = ptr - ENTRY
-    pages = -(-code // 256)
     print('%s: driver %d bytes, %d relocations, file %d bytes (%d sectors); '
-          'HDOS takes %d bytes (%d pages of driver + %d GRT pages)'
-          % (a.output, code, len(relocs), len(out), -(-len(out) // 256),
-             (pages + mnu) * 256, pages, mnu))
+          % (a.output, code, len(relocs), len(out), -(-len(out) // 256)), end='')
+    if h[7] & DT_DD:
+        # A directory device's units each get a page for their GRT, above
+        # the driver
+        pages = -(-code // 256)
+        print('HDOS takes %d bytes (%d pages of driver + %d GRT pages)'
+              % ((pages + mnu) * 256, pages, mnu))
+    else:
+        print('HDOS takes %d bytes, the driver alone' % code)
 
     if a.loaded is not None:
         t = bytearray(img[0][ENTRY:ptr])

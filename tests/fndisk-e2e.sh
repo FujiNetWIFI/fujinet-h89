@@ -2,7 +2,8 @@
 # End to end on the emulated H89 (fujinet-go-h89-desktop's h89_session_run,
 # with FujiNet in-process): boot a 62K CP/M, mount an H17 image in FujiNet
 # slot 1 with CONFIG, load FNDISK, then read, write and warm boot on D:, and
-# check on the host that the file written is in the image.
+# check on the host that the file written is in the image. Then print on
+# UL1: (the FujiNet's printer) and on CRT:, and check what the printer got.
 #
 #   tests/fndisk-e2e.sh --boot CPM62.h8d --config CONFIG.COM [--rig DIR] [--keep DIR]
 #
@@ -33,6 +34,17 @@ else WORK="$(mktemp -d "${TMPDIR:-/tmp}/fndisk-e2e-XXXXXX")"; trap 'rm -rf "${WO
 
 fixup() { python3 -I "${ROOT}/tools/cpm-dir-fixup.py" "$1"; }
 
+# The FujiNet's own files in HOME, with its printer on as RAW (every byte to
+# SD/paper). The emulator's fnconfig.ini has the printer off, and is copied
+# in, with the rest, only where there's no fnconfig.ini yet.
+printer_on() {
+    local out="${FUJINET_LIB_DIR:-${RIG}/tools/fujinet/work/out}" fn="$1/data/fujinet"
+    mkdir -p "${fn}"
+    cp -r "${out}/fnconfig.ini" "${out}/data" "${out}/SD" "${fn}/"
+    sed -i 's/^printer_enabled=0$/printer_enabled=1/' "${fn}/fnconfig.ini"
+    printf '\n[Printer1]\ntype=0\n' >> "${fn}/fnconfig.ini"
+}
+
 # B: holds CONFIG and FNDISK
 mkdir -p "${WORK}/tools"
 cp "${CONFIG}" "${WORK}/tools/CONFIG.COM"
@@ -41,13 +53,17 @@ cp "${FNDISK}" "${WORK}/tools/FNDISK.COM"
     -b CONFIG.COM -a FNDISK.COM -o disk >/dev/null)
 fixup "${WORK}/tools/disk"
 
-# The FujiNet's SD card: an H17 CP/M disk with a text file on it
+# The FujiNet's SD card: an H17 CP/M disk with text files on it. PRINT.TXT
+# has a line longer than FNDISK's print buffer, and a last one with no end,
+# which goes out when PIP ends.
+printer_on "${WORK}/home"
 SD="${WORK}/home/data/fujinet/SD"
-mkdir -p "${SD}" "${WORK}/test"
+mkdir -p "${WORK}/test"
 printf 'Hello from a FujiNet drive on the H89.\r\nThe second line.\r\n\032' > "${WORK}/test/HELLO.TXT"
+printf 'A long line: %s\r\nNo line end here\032' "$(printf '0123456789%.0s' {1..15})" > "${WORK}/test/PRINT.TXT"
 printf '\311' > "${WORK}/test/STUB.COM"
 (cd "${WORK}/test" && "${APPMAKE}" +cpmdisk -f hz89 --container raw --no-com-file \
-    -b STUB.COM -a HELLO.TXT -o disk >/dev/null)
+    -b STUB.COM -a HELLO.TXT -a PRINT.TXT -o disk >/dev/null)
 fixup "${WORK}/test/disk"
 cp "${WORK}/test/disk" "${SD}/TEST.H8D"
 cp "${BOOT}" "${WORK}/boot.h8d"
@@ -61,13 +77,18 @@ cp "${BOOT}" "${WORK}/boot.h8d"
     --type '\r' --until 'Put it in which' --wait 1000 --type '1' --wait 300 --type 'w' \
     --until 'TEST.H8D' --wait 1500 --type '`' --until 'Mount drives' --wait 1500 \
     --type '`' --until 'FujiNet drives' --prompt 'A>' --wait 500 \
-    --type 'B:FNDISK\r' --until 'Installed' --prompt 'A>' --wait 500 --screen \
+    --type 'B:FNDISK\r' --until 'Installed' --until 'LST: is UL1:' --prompt 'A>' --wait 500 --screen \
     --type 'DIR D:\r' --until 'HELLO' --prompt 'A>' --wait 500 \
     --type 'TYPE D:HELLO.TXT\r' --until 'second line' --prompt 'A>' --wait 500 \
     --type 'PIP D:=B:FNDISK.COM\r' --prompt 'A>' --wait 500 \
     --type 'B:FNDISK\r' --until 'Already installed' --prompt 'A>' --wait 500 \
     --type 'DIR D:\r' --until 'FNDISK' --prompt 'A>' --wait 500 \
     --type 'STAT D:\r' --until 'Bytes Remaining On D:' --prompt 'A>' --wait 500 \
+    --type 'PIP LST:=D:HELLO.TXT\r' --prompt 'A>' --wait 500 \
+    --type 'PIP LST:=D:PRINT.TXT\r' --prompt 'A>' --wait 500 \
+    --type 'STAT LST:=CRT:\r' --prompt 'A>' --wait 500 \
+    --type 'PIP LST:=D:HELLO.TXT\r' --prompt 'A>' --wait 500 \
+    --type 'STAT LST:=UL1:\r' --prompt 'A>' --wait 500 --screen \
     --type 'DIR E:\r' --until 'Bdos Err On E: Select' --wait 500 --type '\r' --prompt 'A>' --wait 500 \
     --type 'DIR D:\r' --until 'A>DIR D:' --prompt 'A>' --wait 500 --screen \
     > "${WORK}/run.log" 2>&1 || { grep -E 'timed out|failed' "${WORK}/run.log" >&2 || true
@@ -103,4 +124,24 @@ pad = (len(want) + 127) // 128 * 128
 if data[:len(want)] != want or len(data) != pad:
     sys.exit('FAIL: FNDISK.COM in the image differs (%d bytes, want %d)' % (len(data), pad))
 print('PASS: FNDISK.COM read back from the image, %d bytes' % len(want))
+EOF
+
+# The printer got HELLO.TXT and PRINT.TXT, each to its ^Z; the third PIP, with
+# LST: = CRT:, printed on the screen instead
+python3 -I - "${WORK}/test/HELLO.TXT" "${WORK}/test/PRINT.TXT" "${SD}/paper" "${WORK}/run.log" <<'EOF'
+import re, sys
+hello, text = (open(p, 'rb').read().split(b'\x1a')[0] for p in sys.argv[1:3])
+try:
+    paper = open(sys.argv[3], 'rb').read()
+except FileNotFoundError:
+    sys.exit('FAIL: the printer got nothing')
+if paper != hello + text:
+    sys.exit('FAIL: the printer got %r, not %r' % (paper, hello + text))
+log = re.sub(r'(?m)^\[fujinet\] ', '', open(sys.argv[4], errors='replace').read())
+screen = log.split('STAT LST:=CRT:')[-1].splitlines()
+if not any(a.endswith('PIP LST:=D:HELLO.TXT') and b.startswith('Hello from')
+           for a, b in zip(screen, screen[1:])):
+    sys.exit("FAIL: PIP LST: with LST: = CRT: didn't print on the screen")
+print('PASS: printed on UL1: byte for byte (%d bytes, ending in a line with no end), and on CRT:'
+      % len(paper))
 EOF

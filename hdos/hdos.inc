@@ -28,10 +28,12 @@ DC_RDY          equ     10
 DC_MAX          equ     11
 
 ; Error codes (A on return, with carry set), as ERRORMSG.SYS words them
+EC_DNS          equ     5       ; Device is Not Capable of This Operation
 EC_ILR          equ     10      ; Illegal Request
 EC_RF           equ     18      ; Read Failure
 EC_WF           equ     19      ; Write Failure
 EC_WP           equ     21      ; Disk is Write Protected
+EC_DDA          equ     23      ; Aborted by Device Driver
 EC_UUN          equ     27      ; Unknown Unit
 EC_UNA          equ     30      ; Unit Not Available
 EC_DNR          equ     38      ; Unable to Read this Disk
