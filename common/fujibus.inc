@@ -7,6 +7,9 @@
 ; checksum; NZ otherwise, after a timeout too. The whole reply is always
 ; read, to its closing END, so the next request starts clean.
 ;
+; With FUJI_SHORT, an ACK of up to rep_dlen bytes will do (a network READ
+; gets what is there), and rep_got says how many came.
+;
 ; The includer defines TICKS (the OS's 2 ms tick counter) and buf (SECTOR
 ; bytes), and includes fujibus-vars.inc among its data.
 ;
@@ -118,10 +121,19 @@ rx_done:
         or      a
         sbc     hl,de
         jr      c,rx_bad
+IFDEF FUJI_SHORT
+        ld      (rep_got),hl    ; or less: what came
+        ex      de,hl
+        ld      hl,(rep_dlen)
+        or      a
+        sbc     hl,de
+        jr      c,rx_bad
+ELSE
         ld      de,(rep_dlen)
         or      a
         sbc     hl,de
         jr      nz,rx_bad
+ENDIF
         ld      a,(req_dev)     ; from the device asked
         ld      hl,rep_hdr
         cp      (hl)
@@ -138,7 +150,11 @@ rx_done:
         ld      bc,6
         call    cksum
         ld      hl,buf
+IFDEF FUJI_SHORT
+        ld      bc,(rep_got)
+ELSE
         ld      bc,(rep_dlen)
+ENDIF
         call    cksum
         ld      a,(rx_cks)
         cp      d

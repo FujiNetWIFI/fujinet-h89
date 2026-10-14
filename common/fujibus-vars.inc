@@ -16,6 +16,9 @@ req_auxn:       defb    0       ; how many aux bytes
 req_data:       defw    0       ; data sent after them
 req_dlen:       defw    0
 rep_dlen:       defw    0       ; data expected back, into buf
+IFDEF FUJI_SHORT
+rep_got:        defw    0       ; data that came
+ENDIF
 rep_hdr:        defs    6
 rx_count:       defw    0
 rx_cks:         defb    0

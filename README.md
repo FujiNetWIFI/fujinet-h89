@@ -2,7 +2,8 @@
 
 Software that runs on the H89 to use the H89-ESP32 FujiNet card (an 82C55
 at 0D0H): FNDISK for CP/M and FN.DVD for HDOS make the FujiNet's drive slots
-disks, FNDISK and LP.DVD print on the FujiNet's printer, and FNBOOT starts
+disks, FNDISK and LP.DVD print on the FujiNet's printer, NPIP copies files
+to and from the network on both, and FNBOOT starts
 CONFIG from the monitor, with no disk. CONFIG, which
 picks the images for the FujiNet's drive slots, is in
 [fujinet-config](https://github.com/FujiNetWIFI/fujinet-config) (`make h89`).
@@ -130,7 +131,7 @@ writes nothing.
 - HDOS loads it on first use; it takes 1.4K, with no GRT. `LOAD LP:` loads
   it at once. It has no SET options.
 
-FNDISK, FN.DVD and LP.DVD share their FujiBus code (`common/`).
+FNDISK, FN.DVD, LP.DVD and NPIP share their FujiBus code (`common/`).
 
 ## Where printing goes
 
@@ -142,6 +143,85 @@ web UI (or `/print`) downloads it; the next line printed starts a new one.
   and so does *file printer (TRIM)*, the default, unless a line holds 9BH
   (the Atari's end of line). *Epson 80* makes a PDF, in which FF starts a
   page. *file printer (ASCII)* drops CR and LF, so doesn't suit the H89.
+
+## NPIP: files to and from the FujiNet
+
+`NPIP.COM` (CP/M, on `build/fndisk-cpm.h8d`) and `NPIP.ABS` (HDOS, on
+`build/fn-hdos.h8d`) copy a file PIP's way, `dest=source`, where either
+side can be a URL the FujiNet opens:
+
+```
+A>NPIP
+*C:=TNFS://APPS.IRATA.ONLINE/boot.zx
+boot.zx        [################................] 20480/40960
+*TNFS://myhost/up/=A:README.TXT
+README.TXT     [################################] 2048/2048
+*LST:=http://myhost/notes.txt
+notes.txt      [################################] 1311/1311
+*
+A>NPIP B:X.COM=SD:/X.COM
+```
+
+```
+>SY1:NPIP SY1:=TNFS://APPS.IRATA.ONLINE/boot.zx
+>RUN SY1:NPIP.ABS LP:=SY1:README.TXT
+```
+
+- **With no arguments** NPIP gives PIP's `*` prompt, a copy a line, until
+  an empty line or ^C. With them, it makes the one copy.
+- **A URL** is a scheme of two letters or more, then `:/`: `TNFS://`,
+  `HTTP://`, `SD:/` (the FujiNet's own SD card), and so on; `N:` in front
+  is allowed. Anything else is the system's: `B:NAME.EXT`, `SY1:NAME.EXT`,
+  or a device.
+- **Case:** the CCP and HDOS make a command line capitals, so type a URL
+  with lower case in it at the `*` prompt, which keeps it. The FujiNet finds
+  an 8.3 name whatever its case, but not a directory's.
+- **A destination that names only a place** takes the source's name: a
+  drive or disk (`C:`, `SY1:`), or a URL ending in `/` (or just a host).
+  From a URL the name is made a local one: capitals, letters and digits,
+  8.3 (`Long-Name-File.txt` is `LONGNAME.TXT`).
+- **Devices:** under CP/M, `LST:`, `PUN:` and `CON:`, which stop at the
+  first ^Z, as PIP does. `LST:` is the FujiNet's printer when FNDISK has it
+  on UL1: ([where it goes](#where-printing-goes)), the BIOS's otherwise.
+  Under HDOS, any device: `LP:`, or `TT:` for the screen.
+- **The progress line** shows the source's name, a bar, and the bytes
+  copied of how many: a local file's size, or what the FujiNet reports for a
+  network file under 64K. A larger network file's size comes from its
+  directory's listing (TNFS, SD: and other file systems); over HTTP it shows
+  `?`, and so does any size that turns out wrong. There's none for `CON:`
+  and `TT:`.
+- **Whole records:** a copy on a CP/M disk is filled out to a 128-byte
+  record with ^Z, on an HDOS disk to a 256-byte sector with NULs, and a file
+  sent from one goes with its last record or sector whole.
+- **^C** stops a copy, or the `*` prompt, and leaves NPIP. What it had copied
+  goes: a network file is deleted, and a CP/M file is written as
+  `NAME.$$$`, so an old `NAME` stays. HDOS replaces an old file when the copy
+  starts.
+- **Errors** say which side and why: `sd:/NOSUCH.TXT - not found`. A BDOS
+  error (Select, R/O, a bad sector) ends NPIP as it ends PIP.
+- One file at a time: no wildcards, and none of PIP's options.
+
+### How it works
+
+`npip/` is the program; `cpm/npip/npip.asm` and `hdos/npip/npip.asm` are
+each system's part: the console, files and devices. The source is network
+unit N1 (71H), a network destination N2, and N3 asks a directory for a
+size.
+
+- A network source is OPENed, then STATUS says how many bytes are waiting;
+  READs ask for up to 512 of them at a time, and STATUS is asked again only
+  when they're gone, and says the end with error 136. HTTP never gets a READ
+  for more than it holds. FujiBus takes a READ's reply short (`FUJI_SHORT` in
+  `common/fujibus.inc`).
+- A network destination is written 512 bytes at a time, and an HTTP one
+  gets no STATUS until CLOSE, as STATUS would send the PUT early. To take
+  back a partial copy, NPIP deletes a file system's, and drops an HTTP PUT
+  unsent with a LOCK, which HTTP doesn't do but which ends the channel
+  (DELETE would delete the server's copy).
+- ^C is a key like any other: CP/M's console is read through the BIOS (BDOS
+  would keep a ^C for itself), and HDOS's is made raw while NPIP runs. It's
+  looked for between blocks and while FujiBus waits; a reply given up on is
+  drained at once, so a disk driver's next call starts clean.
 
 ## FNBOOT: CONFIG from the FujiNet's flash
 
@@ -213,12 +293,14 @@ Two things the monitor needs, which stage 2 sees to:
 Needs z88dk (`z88dk-z80asm`, `z88dk-appmake`) on PATH.
 
 ```
-make                    # build/FNDISK.COM, build/fndisk-cpm.h8d,
-                        # build/FN.DVD, build/LP.DVD, build/fn-hdos.h8d
+make                    # build/FNDISK.COM, build/NPIP.COM, build/fndisk-cpm.h8d,
+                        # build/FN.DVD, build/LP.DVD, build/NPIP.ABS,
+                        # build/fn-hdos.h8d
 make tools-disk CONFIG=../fujinet-config/r2r/h89-cpm/config.com
-                        # build/fujinet-cpm.h8d: CONFIG.COM and FNDISK.COM
+                        # build/fujinet-cpm.h8d: CONFIG.COM, FNDISK.COM, NPIP.COM
 make hdos-tools-disk CONFIG_ABS=../fujinet-config/r2r/h89-hdos/config.abs
-                        # build/fujinet-hdos.h8d: CONFIG.ABS, FN.DVD, LP.DVD
+                        # build/fujinet-hdos.h8d: CONFIG.ABS, FN.DVD, LP.DVD,
+                        # NPIP.ABS
 make autorun CONFIG_ABS=../fujinet-config/r2r/h89-hdos/config.abs
                         # build/autorun.img: FNBOOT's boot image
 make monitor-rom MTR=.../2732_444-142_mtr90.u518
@@ -274,6 +356,25 @@ drivers where they should; then it tries a read-only image, an empty slot,
 an image that isn't an H17 disk, and printing with the printer off (which
 has to fail, and leave FN0: working). `CONFIG.ABS` must be built with
 `-DH89_RIG_KEYS` (`CFLAGS_EXTRA_H89-HDOS`).
+
+For NPIP:
+
+```
+tests/npip-cpm-e2e.sh --boot cpm62.h8d [--tnfs-root DIR]
+tests/npip-hdos-e2e.sh --boot boot.h8d
+```
+
+Each copies between a disk and the FujiNet's SD card (`SD:/` URLs) both
+ways, at the `*` prompt and from the command line, a file over 64K among
+them (its size, as it copies, has to come from its directory); tries a
+missing file and an unknown device; prints (`LST:` through FNDISK,
+`LP:`); copies to the screen (`CON:`, `TT:`); and presses ^C in a
+download, an upload and at the prompt. On the host, every copy has to be
+the source byte for byte, and what ^C stopped has to be gone. The CP/M one
+also copies over HTTP from a server it starts, and with `--tnfs-root DIR`,
+over TNFS: the `tnfsd` on this machine has to serve DIR on 16384 (a TNFS URL
+has no port). `--key ctrl-c` needs a fujinet-go-h89-desktop that has the
+ctrl- keys.
 
 For FNBOOT:
 
