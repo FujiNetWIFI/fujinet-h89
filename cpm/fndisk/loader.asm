@@ -12,8 +12,10 @@
 ; Copies the resident part above the BIOS and points the BIOS jump table's
 ; disk entries at it, and its LIST, LISTST and WBOOT, then sets LST: to UL1:
 ; and warm boots so CP/M starts with the new drives.
-; The resident part needs the room a 62K system leaves (MOVCPM17 62 *, then
-; SYSGEN): the BIOS of a 64K one runs to the top of memory.
+; The resident part runs from res_start (F720H) to the top of memory, so the
+; BIOS's RAM has to end below it. A stock 62K system's does (MOVCPM17 62 *,
+; then SYSGEN); a BIOS with more in it (CF, RTC, LPT) needs a smaller
+; system, and FNDISK says how many K smaller.
 ;-----------------------------------------------------------------------------
 
         include "h89.inc"
@@ -70,13 +72,23 @@ start:
         sbc     hl,de
         jp      c,another
 
-        ; Room above the BIOS?
+        ; Room above the BIOS? An end that isn't above it wrapped: its RAM
+        ; runs to the top of memory.
         ld      hl,(bios)
         ld      de,BIOS_RAM_END
         add     hl,de
         ld      e,(hl)
         inc     hl
         ld      d,(hl)
+        ld      (ram_end),de
+        ld      hl,(bios)
+        or      a
+        sbc     hl,de
+        jr      c,ram_end_ok
+        ld      hl,0
+        ld      (ram_end),hl
+        jp      no_room
+ram_end_ok:
         ld      hl,res_start
         or      a
         sbc     hl,de
@@ -168,9 +180,6 @@ not_heath:
 another:
         ld      de,msg_another
         jr      fail
-no_room:
-        ld      de,msg_no_room
-        jr      fail
 no_card:
         ld      de,msg_no_card
         jr      fail
@@ -179,6 +188,51 @@ no_letters:
 fail:
         call    print
         jp      0
+
+; Where the BIOS's RAM runs to, where ours starts, and how many K smaller a
+; system has to be (MOVCPM17 moves it all 400H a K): the 1 to 3K the RAM end
+; is past res_start, rounded up
+no_room:
+        ld      hl,(ram_end)
+        dec     hl              ; its last byte
+        ld      de,msg_ram_top
+        call    hex_word
+        ld      hl,res_start
+        ld      de,msg_res_start
+        call    hex_word
+        ld      hl,(ram_end)
+        ld      de,0x103FF - res_start
+        add     hl,de
+        ld      a,h
+        srl     a
+        srl     a
+        add     a,'0'
+        ld      (msg_smaller),a
+        ld      de,msg_no_room
+        jr      fail
+
+; HL as 4 hex digits at DE
+hex_word:
+        ld      a,h
+        call    hex_byte
+        ld      a,l
+hex_byte:
+        push    af
+        rrca
+        rrca
+        rrca
+        rrca
+        call    hex_digit
+        pop     af
+hex_digit:
+        and     0x0F
+        add     a,0x90
+        daa
+        adc     a,0x40
+        daa
+        ld      (de),a
+        inc     de
+        ret
 
 ;-----------------------------------------------------------------------------
 ; The CP/M drive for slot 1 into A: the letter given, or the first one the
@@ -361,8 +415,11 @@ msg_installed:  defm    "Installed.", 13, 10, "$"
 msg_already:    defm    "Already installed.", 13, 10, "$"
 msg_another:    defm    "Another FNDISK is installed. Boot again, then run this one.", 13, 10, "$"
 msg_not_heath:  defm    "Needs Heath/Zenith CP/M 2.2.04.", 13, 10, "$"
-msg_no_room:    defm    "No room above the BIOS. Make a 62K system", 13, 10
-                defm    "(MOVCPM17 62 *, then SYSGEN) and boot that.", 13, 10, "$"
+msg_no_room:    defm    "No room above the BIOS: its RAM runs to "
+msg_ram_top:    defm    "xxxxH, FNDISK's starts at "
+msg_res_start:  defm    "xxxxH.", 13, 10
+                defm    "Make a system "
+msg_smaller:    defm    "nK smaller (MOVCPM17, then SYSGEN) and boot that.", 13, 10, "$"
 msg_no_letters: defm    "No 8 free drive letters there.", 13, 10, "$"
 msg_no_fujinet: defm    "The FujiNet isn't answering.", 13, 10, "$"
 msg_no_card:    defm    "No FujiNet card (82C55 at 0D0H) found.", 13, 10, "$"
@@ -376,6 +433,7 @@ msg_rw:         defm    " (read/write)$"
 msg_eol:        defm    13, 10, "$"
 
 bios:           defw    0
+ram_end:        defw    0       ; first byte above the BIOS's RAM; 0 = the top
 free_drive:     defb    0
 
                 defs    64

@@ -4,6 +4,7 @@
 # slot 1 with CONFIG, load FNDISK, then read, write and warm boot on D:, and
 # check on the host that the file written is in the image. Then print on
 # UL1: (the FujiNet's printer) and on CRT:, and check what the printer got.
+# First, check what FNDISK says where there's no room above the BIOS.
 #
 #   tests/fndisk-e2e.sh --boot CPM62.h8d --config CONFIG.COM [--rig DIR] [--keep DIR]
 #
@@ -52,6 +53,35 @@ cp "${FNDISK}" "${WORK}/tools/FNDISK.COM"
 (cd "${WORK}/tools" && "${APPMAKE}" +cpmdisk -f hz89 --container raw --no-com-file \
     -b CONFIG.COM -a FNDISK.COM -o disk >/dev/null)
 fixup "${WORK}/tools/disk"
+
+# No room above the BIOS: FNDISK has to say where the BIOS's RAM runs to and
+# how many K smaller to make the system. The rig's 64K system; then the 62K
+# one with the BIOS's RAM end (BIOS+4BH, the BIOS at E600H) poked to FB40H,
+# as a BIOS with more drivers in it (CF, RTC, LPT) has, and to 0000H, a BIOS
+# whose RAM runs to the top of memory.
+no_room() {     # $1 = name, $2 = boot disk, $3 = RAM end to poke or "", $4 = its last byte, $5 = K
+    local log="${WORK}/$1.log" poke=()
+    cp "$2" "${WORK}/$1.h8d"
+    [[ -z "$3" ]] || poke=(--debug 'radix hex' --debug 'mem 1 2'
+                           --debug "poke 0xe64b \$${3:2:2} \$${3:0:2}")
+    "${RUN}" --roms "${RIG}/tools/roms" --home "${WORK}/$1" --timeout 60 \
+        --disk "h17:1=${WORK}/$1.h8d" --disk "h17:2=${WORK}/tools/disk" \
+        --until 'H:' --type 'B\r' --until 'A>' --wait 1000 ${poke[@]+"${poke[@]}"} \
+        --type 'B:FNDISK\r' --until 'boot that' --prompt 'A>' --wait 500 --screen \
+        > "${log}" 2>&1 || { grep -E 'timed out|failed' "${log}" >&2 || true
+            sed -n '/---- screen ----/,/^\(\[fujinet\] \)\?----------------/p' "${log}" | sed 's/^\[fujinet\] //' | tail -8 >&2
+            echo "FAIL: no room ($1): the run stopped" >&2; exit 1; }
+    if [[ -n "$3" ]] && ! grep -Eq '^(\[fujinet\] )?0001 +03 E6' "${log}"; then
+        echo "FAIL: no room ($1): the boot disk's BIOS isn't at E600H (make it with make-62k-boot.sh)" >&2; exit 1
+    fi
+    grep -q "its RAM runs to $4H, FNDISK's starts at F720H\." "${log}" \
+        && grep -q "Make a system $5K smaller" "${log}" \
+        || { grep -A2 'No room' "${log}" >&2; echo "FAIL: no room ($1): want $4H and ${5}K" >&2; exit 1; }
+    echo "PASS: no room ($1): its RAM runs to $4H, ${5}K smaller"
+}
+no_room 64k "${RIG}/tools/disks/boot/cpm-2.2.04-64k.h8d" "" FF11 2
+no_room bigger-bios "${BOOT}" FB40 FB3F 2
+no_room to-the-top "${BOOT}" 0000 FFFF 3
 
 # The FujiNet's SD card: an H17 CP/M disk with text files on it. PRINT.TXT
 # has a line longer than FNDISK's print buffer, and a last one with no end,

@@ -30,9 +30,16 @@ A>PIP LST:=D:README.TXT
   as z88dk's `appmake +cpmdisk -f hz89`). A slot is a drive only while the
   FujiNet has an image mounted in it and its name ends in `.h8d`; any other
   slot gives `Bdos Err On x: Select`.
-- **It needs a 62K (or smaller) system.** The driver stays resident above
-  the BIOS, and the BIOS of a 64K system runs to the top of memory. Make one
-  once with `MOVCPM17 62 *` and then `SYSGEN` onto the boot disk.
+- **It needs a system smaller than 64K.** The driver stays resident from
+  F720H to the top of memory, so the BIOS's RAM has to end below that.
+  Heath's own BIOS does at 62K: make one once with `MOVCPM17 62 *` and then
+  `SYSGEN` onto the boot disk. A BIOS with more in it (CF, RTC, LPT drivers)
+  needs a smaller system still, and FNDISK says how many K smaller:
+
+  ```
+  No room above the BIOS: its RAM runs to FB3FH, FNDISK's starts at F720H.
+  Make a system 2K smaller (MOVCPM17, then SYSGEN) and boot that.
+  ```
 - `FNDISK x` puts slot 1 on drive x: instead (not one of the BIOS's own).
   Running it again lists the drives.
 - Mount images with CONFIG; it returns to CP/M with a warm boot, which
@@ -233,7 +240,10 @@ tests/make-62k-boot.sh cpm62.h8d
 tests/fndisk-e2e.sh --boot cpm62.h8d --config CONFIG.COM
 ```
 
-The second mounts an H17 image in slot 1 with CONFIG, loads FNDISK, reads
+The second first runs FNDISK where there's no room, and checks what it
+says: on the rig's 64K system, and on the 62K one with the BIOS's RAM end
+poked (the BIOS has to be at E600H, as `make-62k-boot.sh` makes it). Then
+it mounts an H17 image in slot 1 with CONFIG, loads FNDISK, reads
 and writes D:, warm boots, and checks on the host that the file written is
 in the image byte for byte. Then it prints two files on UL1: and one on
 CRT:, and checks that the FujiNet's printer (turned on, as RAW, for the
