@@ -5,7 +5,7 @@
 ; Copyright (C) 2026 Thomas Cherryhomes
 ; SPDX-License-Identifier: GPL-3.0-or-later
 ;
-; Loads the program in the sectors after it (an HDOS .ABS: CONFIG) and runs
+; Loads the program in the sectors after it (an HDOS .ABS: FNCONFIG) and runs
 ; it in HDOS's place: the system calls it makes go to the shim, which lives
 ; at SHIM_ORG under it, and its console bytes and tick counter are where HDOS
 ; keeps them (the tick is the monitor's own).
@@ -23,7 +23,7 @@
         include "shim.def"
 
 SHIM_ORG        equ     0x2040
-SHIM_TOP        equ     0x20D6  ; S.CSLMD..S.CONFL: CONFIG reads them
+SHIM_TOP        equ     0x20D6  ; S.CSLMD..S.CONFL: FNCONFIG reads them
 CMDLINE         equ     0x2100  ; ..227FH: HDOS's command line, see below
 CMDLINE_SIZE    equ     0x2280 - CMDLINE
 RETRIES         equ     3
@@ -43,7 +43,7 @@ start:
         call    check
         jp      nz,bad_sector
 
-        ld      a,SETUP_MARK    ; the card is set up: CONFIG's port_init
+        ld      a,SETUP_MARK    ; the card is set up: FNCONFIG's port_init
         out     (PORTB),a       ; leaves it be
 
         ; Sector k goes to load + 512 * (k - 1), last first: each reply's

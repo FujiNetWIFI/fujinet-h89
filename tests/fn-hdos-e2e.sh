@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
 # End to end on the emulated H89 (fujinet-go-h89-desktop's h89_session_run,
-# FujiNet in-process): HDOS 2.0 with FN.DVD, CONFIG mounting images in the
+# FujiNet in-process): HDOS 2.0 with FN.DVD, FNCONFIG mounting images in the
 # FujiNet's slots, and FN0: used as a disk.
 #
-#   tests/fn-hdos-e2e.sh --boot BOOT.h8d --config CONFIG.ABS [--rig DIR] [--keep DIR]
+#   tests/fn-hdos-e2e.sh --boot BOOT.h8d --config FNCONFIG.ABS [--rig DIR] [--keep DIR]
 #
-# BOOT.h8d comes from tests/make-hdos-boot.sh. CONFIG.ABS must be built with
+# BOOT.h8d comes from tests/make-hdos-boot.sh. FNCONFIG.ABS must be built with
 # -DH89_RIG_KEYS (` stands in for ESC: the rig types only printable keys).
 #
 # Session A: an image read/write: LOAD FN:, MOUNT, CAT, TYPE, RUN from it,
 # COPY onto it, print a file on LP:, DISMOUNT, MOUNT again; then on the host,
 # the copy must be in the image byte for byte, the printer must have the file
 # as LP: puts it, and the memory HDOS gave each driver must be as reckoned;
-# and CONFIG must still run with the drivers in.
+# and FNCONFIG must still run with the drivers in.
 # Session B: read only, and the errors: an empty slot, a slot holding
 # something that isn't an H17 disk, and printing with the printer off.
 set -euo pipefail
@@ -26,7 +26,7 @@ while [[ $# -gt 0 ]]; do
         --config) CONFIG="$2"; shift 2 ;;
         --rig) RIG="$2"; shift 2 ;;
         --keep) KEEP="$2"; shift 2 ;;
-        *) echo "usage: $0 --boot BOOT.h8d --config CONFIG.ABS [--rig DIR] [--keep DIR]" >&2; exit 2 ;;
+        *) echo "usage: $0 --boot BOOT.h8d --config FNCONFIG.ABS [--rig DIR] [--keep DIR]" >&2; exit 2 ;;
     esac
 done
 [[ -f "${BOOT}" && -f "${CONFIG}" ]] || { echo "need --boot and --config" >&2; exit 2; }
@@ -48,11 +48,11 @@ printer_on() {
     printf '\n[Printer1]\ntype=0\n' >> "${fn}/fnconfig.ini"
 }
 
-# SY1: holds CONFIG, and a file to print: tabs, and a line longer than a
+# SY1: holds FNCONFIG, and a file to print: tabs, and a line longer than a
 # packet
 printf 'Printed through LP:\n\tA tab\nAB\tC\n%s\n' "$(printf '0123456789%.0s' {1..30})" > "${WORK}/print.txt"
 hdosfs blank "${WORK}/tools.h8d" --label TOOLS
-hdosfs put "${WORK}/tools.h8d" "${CONFIG}" --name CONFIG.ABS
+hdosfs put "${WORK}/tools.h8d" "${CONFIG}" --name FNCONFIG.ABS
 hdosfs put "${WORK}/tools.h8d" "${WORK}/print.txt" --name PRINT.TXT
 
 # The test image: a text file and a program
@@ -80,7 +80,7 @@ cp "${WORK}/test.h8d" "${WORK}/a/data/fujinet/SD/TEST.H8D"
 mapfile -t BOOT_A < <(boot)
 "${RUN}" --roms "${RIG}/tools/roms" --home "${WORK}/a" --timeout 90 "${BOOT_A[@]}" \
     --debug 'mem 0x20d0 2' \
-    --type 'RUN SY1:CONFIG.ABS\r' --until 'Drive Slots' --until 'Quit' --wait 1500 \
+    --type 'RUN SY1:FNCONFIG.ABS\r' --until 'Drive Slots' --until 'Quit' --wait 1500 \
     --type '\r' --until 'TEST.H8D' --wait 2000 --type 'f' --until 'matching' --type 'TEST*\r' --wait 3000 \
     --type '\r' --until 'Put it in which' --wait 1000 --type '1' --wait 300 --type 'w' \
     --until 'TEST.H8D' --wait 1500 --type '`' --until 'Mount drives' --wait 1500 --type '`' \
@@ -98,7 +98,7 @@ mapfile -t BOOT_A < <(boot)
     --type 'MOUNT FN0:\r' --until 'MOUNTED ON FN0:' --prompt '>' \
     --type 'CAT FN0:\r' --until 'PIP' --prompt '>' --wait 500 --screen \
     --type 'DISMOUNT FN0:\r' --until 'DISMOUNTED' --prompt '>' \
-    --type 'RUN SY1:CONFIG.ABS\r' --until 'Drive Slots' --until 'Quit' --wait 1000 --screen \
+    --type 'RUN SY1:FNCONFIG.ABS\r' --until 'Drive Slots' --until 'Quit' --wait 1000 --screen \
     > "${WORK}/a.log" 2>&1 || { grep -E 'timed out' "${WORK}/a.log" >&2 || true; screen "${WORK}/a.log" | tail -30 >&2; fail "session A stopped"; }
 screen "${WORK}/a.log" | tail -42 | head -20
 
@@ -153,7 +153,7 @@ cp "${WORK}/notdisk.img" "${WORK}/b/data/fujinet/SD/NOTDISK.IMG"
 SUM="$(sha256sum < "${WORK}/b/data/fujinet/SD/TEST.H8D")"
 mapfile -t BOOT_B < <(boot)
 "${RUN}" --roms "${RIG}/tools/roms" --home "${WORK}/b" --timeout 90 "${BOOT_B[@]}" \
-    --type 'RUN SY1:CONFIG.ABS\r' --until 'Drive Slots' --until 'Quit' --wait 1500 \
+    --type 'RUN SY1:FNCONFIG.ABS\r' --until 'Drive Slots' --until 'Quit' --wait 1500 \
     --type '\r' --until 'TEST.H8D' --wait 2000 --type 'f' --until 'matching' --type 'TEST*\r' --wait 3000 \
     --type '\r' --until 'Put it in which' --wait 1000 --type '1' --wait 300 --type '\r' \
     --until 'TEST.H8D' --wait 1500 --type 'f' --until 'matching' --key erase --wait 300 --type 'NOTDISK*\r' --wait 3000 \

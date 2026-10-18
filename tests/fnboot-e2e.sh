@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # End to end on the emulated H89 (fujinet-go-h89-desktop's h89_session_run,
 # with FujiNet in-process): FNBOOT, put in RAM at 0C000H (the emulator only
-# takes stock ROMs) and started with Go, boots CONFIG from the image in the
-# FujiNet's flash; ESC in CONFIG (mount the drives and exit) goes back to the
+# takes stock ROMs) and started with Go, boots FNCONFIG from the image in the
+# FujiNet's flash; ESC in FNCONFIG (mount the drives and exit) goes back to the
 # monitor. Then, with no image in flash, Go comes back to the monitor.
 #
-#   tests/fnboot-e2e.sh --config CONFIG.ABS [--rig DIR] [--keep DIR]
+#   tests/fnboot-e2e.sh --config FNCONFIG.ABS [--rig DIR] [--keep DIR]
 #
-# CONFIG.ABS is the HDOS build (fujinet-config, make h89-hdos/r2r).
+# FNCONFIG.ABS is the HDOS build (fujinet-config, make h89-hdos/r2r).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -18,7 +18,7 @@ while [[ $# -gt 0 ]]; do
         --config) CONFIG="$2"; shift 2 ;;
         --rig) RIG="$2"; shift 2 ;;
         --keep) KEEP="$2"; shift 2 ;;
-        *) echo "usage: $0 --config CONFIG.ABS [--rig DIR] [--keep DIR]" >&2; exit 2 ;;
+        *) echo "usage: $0 --config FNCONFIG.ABS [--rig DIR] [--keep DIR]" >&2; exit 2 ;;
     esac
 done
 [[ -f "${CONFIG}" ]] || { echo "need --config" >&2; exit 2; }
@@ -62,8 +62,8 @@ run() {         # $1 = log, the rest the steps
         echo "FAIL: the run stopped (${log##*/})" >&2; exit 1; }
 }
 
-# CONFIG from flash, and back to the monitor: ESC is the HDOS console's
-# raw input (and CONFIG's wait for more of a key, on the monitor's tick),
+# FNCONFIG from flash, and back to the monitor: ESC is the HDOS console's
+# raw input (and FNCONFIG's wait for more of a key, on the monitor's tick),
 # and the exit is .EXIT
 fujinet "${WORK}/boot" "${WORK}/autorun.img"
 run "${WORK}/boot.log" --home "${WORK}/boot" \
@@ -73,7 +73,7 @@ run "${WORK}/boot.log" --home "${WORK}/boot" \
 grep -q "$(stat -c %s "${WORK}/fnboot.bin") bytes at C000" "${WORK}/boot.log" \
     || { echo "FAIL: the poke didn't take" >&2; exit 1; }
 screen "${WORK}/boot.log"
-echo "PASS: FNBOOT booted CONFIG from the FujiNet's flash, and ESC went back to the monitor"
+echo "PASS: FNBOOT booted FNCONFIG from the FujiNet's flash, and ESC went back to the monitor"
 
 # No image: a NAK, so FNBOOT HALTs, and the monitor says H (with a bell)
 fujinet "${WORK}/none" ""

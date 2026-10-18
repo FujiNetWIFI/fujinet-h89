@@ -1,5 +1,5 @@
 ;-----------------------------------------------------------------------------
-; FNBOOT: CONFIG from the FujiNet's flash, started with the monitor's Go
+; FNBOOT: FNCONFIG from the FujiNet's flash, started with the monitor's Go
 ;
 ; Copyright (C) 2026 Thomas Cherryhomes
 ; SPDX-License-Identifier: GPL-3.0-or-later

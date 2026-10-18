@@ -4,12 +4,12 @@ Software that runs on the H89 to use the H89-ESP32 FujiNet card (an 82C55
 at 0D0H): FNDISK for CP/M and FN.DVD for HDOS make the FujiNet's drive slots
 disks, FNDISK and LP.DVD print on the FujiNet's printer, NPIP copies files
 to and from the network on both, and FNBOOT starts
-CONFIG from the monitor, with no disk. CONFIG, which
+FNCONFIG from the monitor, with no disk. FNCONFIG, which
 picks the images for the FujiNet's drive slots, is in
 [fujinet-config](https://github.com/FujiNetWIFI/fujinet-config) (`make h89`).
 
 [Releases](https://github.com/FujiNetWIFI/fujinet-h89/releases) have every
-file built: the programs, the drivers, CONFIG, and the disks with them on.
+file built: the programs, the drivers, FNCONFIG, and the disks with them on.
 
 ## FNDISK: FujiNet drives for CP/M
 
@@ -46,7 +46,7 @@ A>PIP LST:=D:README.TXT
   ```
 - `FNDISK x` puts slot 1 on drive x: instead (not one of the BIOS's own).
   Running it again lists the drives.
-- Mount images with CONFIG; it returns to CP/M with a warm boot, which
+- Mount images with FNCONFIG; it returns to CP/M with a warm boot, which
   logs the drives in afresh.
 - **Printing:** installing sets LST: to UL1:, the FujiNet's printer
   ([where it goes](#where-printing-goes)), so `PIP LST:=`, ^P and
@@ -96,7 +96,7 @@ LABEL: FUJINET TEST DISK
 - HDOS loads the driver on first use and keeps it until the next boot: it
   takes about 4.3K (the driver, and a 256-byte GRT for each unit).
   `LOAD FN:` loads it at once.
-- **DISMOUNT before changing the slots with CONFIG**, and MOUNT again after.
+- **DISMOUNT before changing the slots with FNCONFIG**, and MOUNT again after.
   RESET doesn't suit FN: (it waits for the drive to go not-ready, which a
   FujiNet slot never does).
 
@@ -226,11 +226,11 @@ size.
   looked for between blocks and while FujiBus waits; a reply given up on is
   drained at once, so a disk driver's next call starts clean.
 
-## FNBOOT: CONFIG from the FujiNet's flash
+## FNBOOT: FNCONFIG from the FujiNet's flash
 
 FNBOOT is about 100 bytes, started with the monitor's Go. It restarts the
 ESP32, which puts the boot image it keeps in flash (`/autorun.img`) in its
-first drive slot, and boots CONFIG from that:
+first drive slot, and boots FNCONFIG from that:
 
 ```
   H: Go 017200
@@ -251,8 +251,8 @@ FujiNet boot .........................................................
   `/autorun.img` for the H89. Today the H89 builds as the RS232 platform and
   ships the MS-DOS one, and fn-h89 doesn't mount one on the H89 at all
   (`#ifndef PINMAP_H89` in `rs232Fuji.cpp`).
-- **CONFIG returns to the monitor**, after mounting the drives (ESC) or not
-  (Q). Go again restarts the ESP32, so CONFIG comes back whatever was mounted.
+- **FNCONFIG returns to the monitor**, after mounting the drives (ESC) or not
+  (Q). Go again restarts the ESP32, so FNCONFIG comes back whatever was mounted.
 - **When it fails:**
   - An empty slot: a bell and the monitor's prompt. Go then RETURN tries
     again.
@@ -270,15 +270,15 @@ of device 31H), SLIP-decodes the reply to 227AH so that the sector lands at
 checksum or time out.
 
 Sector 0 is stage 2 (`boot/stage2.asm`), and `tools/fnboot.py` puts
-`CONFIG.ABS` after it. Stage 2:
+`FNCONFIG.ABS` after it. Stage 2:
 
 1. Checks its own reply.
-2. Sets the card's setup mark, so CONFIG leaves the card alone.
-3. Loads CONFIG to 2A80H, last sector first. Each reply's header lands
+2. Sets the card's setup mark, so FNCONFIG leaves the card alone.
+3. Loads FNCONFIG to 2A80H, last sector first. Each reply's header lands
    below its sector, in space that's loaded next.
-4. Runs CONFIG in HDOS's place.
+4. Runs FNCONFIG in HDOS's place.
 
-CONFIG makes only four HDOS calls (`.SCIN`, `.SCOUT`, `.CONSL`, `.EXIT`).
+FNCONFIG makes only four HDOS calls (`.SCIN`, `.SCOUT`, `.CONSL`, `.EXIT`).
 `boot/shim.asm` answers them from 2040H, through the monitor's RST 38H
 vector, with the console's 8250 polled. The monitor's own 2 ms tick is at
 201BH, where HDOS keeps its own.
@@ -300,9 +300,9 @@ make                    # build/FNDISK.COM, build/NPIP.COM, build/fndisk-cpm.h8d
                         # build/FN.DVD, build/LP.DVD, build/NPIP.ABS,
                         # build/fn-hdos.h8d
 make tools-disk CONFIG=../fujinet-config/r2r/h89-cpm/config.com
-                        # build/fujinet-cpm.h8d: CONFIG.COM, FNDISK.COM, NPIP.COM
+                        # build/fujinet-cpm.h8d: FNCONFIG.COM, FNDISK.COM, NPIP.COM
 make hdos-tools-disk CONFIG_ABS=../fujinet-config/r2r/h89-hdos/config.abs
-                        # build/fujinet-hdos.h8d: CONFIG.ABS, FN.DVD, LP.DVD,
+                        # build/fujinet-hdos.h8d: FNCONFIG.ABS, FN.DVD, LP.DVD,
                         # NPIP.ABS
 make autorun CONFIG_ABS=../fujinet-config/r2r/h89-hdos/config.abs
                         # build/autorun.img: FNBOOT's boot image
@@ -322,18 +322,18 @@ with FujiNet in-process:
 
 ```
 tests/make-62k-boot.sh cpm62.h8d
-tests/fndisk-e2e.sh --boot cpm62.h8d --config CONFIG.COM
+tests/fndisk-e2e.sh --boot cpm62.h8d --config FNCONFIG.COM
 ```
 
 The second first runs FNDISK where there's no room, and checks what it
 says: on the rig's 64K system, and on the 62K one with the BIOS's RAM end
 poked (the BIOS has to be at E600H, as `make-62k-boot.sh` makes it). Then
-it mounts an H17 image in slot 1 with CONFIG, loads FNDISK, reads
+it mounts an H17 image in slot 1 with FNCONFIG, loads FNDISK, reads
 and writes D:, warm boots, and checks on the host that the file written is
 in the image byte for byte. Then it prints two files on UL1: and one on
 CRT:, and checks that the FujiNet's printer (turned on, as RAW, for the
 test: its `SD/paper`) got the first two byte for byte, the end of the
-second, which has no CR LF, included. `CONFIG.COM` must be built with
+second, which has no CR LF, included. `FNCONFIG.COM` must be built with
 `-DH89_RIG_KEYS` (the rig types only printable keys; ` stands in for ESC):
 
 ```
@@ -348,16 +348,16 @@ For HDOS:
 
 ```
 tests/make-hdos-boot.sh boot.h8d            # HDOS 2.0 with FN.DVD and LP.DVD on SY0:
-tests/fn-hdos-e2e.sh --boot boot.h8d --config CONFIG.ABS
+tests/fn-hdos-e2e.sh --boot boot.h8d --config FNCONFIG.ABS
 ```
 
-The second mounts an image with CONFIG, then LOADs, MOUNTs, CATs, TYPEs,
+The second mounts an image with FNCONFIG, then LOADs, MOUNTs, CATs, TYPEs,
 RUNs from and COPYs onto FN0:, COPYs a file to LP:, DISMOUNTs and MOUNTs
 again, and checks on the host that the copy is in the image byte for byte,
 that the printer got the file as LP: puts it, and that HDOS put both
 drivers where they should; then it tries a read-only image, an empty slot,
 an image that isn't an H17 disk, and printing with the printer off (which
-has to fail, and leave FN0: working). `CONFIG.ABS` must be built with
+has to fail, and leave FN0: working). `FNCONFIG.ABS` must be built with
 `-DH89_RIG_KEYS` (`CFLAGS_EXTRA_H89-HDOS`).
 
 For NPIP:
@@ -382,13 +382,13 @@ ctrl- keys.
 For FNBOOT:
 
 ```
-tests/fnboot-e2e.sh --config CONFIG.ABS
+tests/fnboot-e2e.sh --config FNCONFIG.ABS
 ```
 
 The emulator only takes stock ROMs, so this puts FNBOOT in RAM at 0C000H
 with the debugger and types `G300000`. The FujiNet gets the boot image in
-its flash: CONFIG has to come up, and ESC has to bring back the monitor.
-Then, with no image, Go has to come straight back. Any HDOS `CONFIG.ABS`
+its flash: FNCONFIG has to come up, and ESC has to bring back the monitor.
+Then, with no image, Go has to come straight back. Any HDOS `FNCONFIG.ABS`
 does (the rig presses a real ESC here). The emulator's FujiNet keeps
 running when EN drops, so only real hardware shows the restart bringing
 the image back.

@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
 
 env:
-  # CONFIG for the H89 is fujinet-config PR #262; move to main when it merges
+  # FNCONFIG for the H89 is fujinet-config PR #262; move to main when it merges
   CONFIG_REF: 92cca0eb2ff26bd7e95926cde592895065741701
   # Upstream has the 8255 setup-after-reset fix (#136); no release does yet
   FUJINET_LIB_H89: https://github.com/FujiNetWIFI/fujinet-lib.git#main
@@ -35,7 +35,7 @@ jobs:
           ref: ${{ env.CONFIG_REF }}
           path: fujinet-config
 
-      - name: Build CONFIG
+      - name: Build FNCONFIG
         run: make -C fujinet-config FUJINET_LIB_H89="$FUJINET_LIB_H89" h89
 
       - name: Build
@@ -54,8 +54,8 @@ jobs:
           cp build/{FNDISK.COM,NPIP.COM,fndisk-cpm.h8d,fujinet-cpm.h8d} dist/
           cp build/{FN.DVD,LP.DVD,NPIP.ABS,fn-hdos.h8d,fujinet-hdos.h8d} dist/
           cp build/{fnboot.bin,stage2.bin,autorun.img} dist/
-          cp fujinet-config/r2r/h89-cpm/config.com dist/CONFIG.COM
-          cp fujinet-config/r2r/h89-hdos/config.abs dist/CONFIG.ABS
+          cp fujinet-config/r2r/h89-cpm/config.com dist/FNCONFIG.COM
+          cp fujinet-config/r2r/h89-hdos/config.abs dist/FNCONFIG.ABS
 
       - uses: actions/upload-artifact@v7
         with:
@@ -83,7 +83,7 @@ jobs:
         run: |
           { cat .github/release-notes.md
             echo
-            echo "CONFIG is FujiNetWIFI/fujinet-config@${CONFIG_REF}."
+            echo "FNCONFIG is FujiNetWIFI/fujinet-config@${CONFIG_REF}."
           } > notes.md
           gh release create "$GITHUB_REF_NAME" dist/* --title "$GITHUB_REF_NAME" \
             --notes-file notes.md --generate-notes

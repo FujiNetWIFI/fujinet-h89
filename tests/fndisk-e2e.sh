@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # End to end on the emulated H89 (fujinet-go-h89-desktop's h89_session_run,
 # with FujiNet in-process): boot a 62K CP/M, mount an H17 image in FujiNet
-# slot 1 with CONFIG, load FNDISK, then read, write and warm boot on D:, and
+# slot 1 with FNCONFIG, load FNDISK, then read, write and warm boot on D:, and
 # check on the host that the file written is in the image. Then print on
 # UL1: (the FujiNet's printer) and on CRT:, and check what the printer got.
 # First, check what FNDISK says where there's no room above the BIOS.
 #
-#   tests/fndisk-e2e.sh --boot CPM62.h8d --config CONFIG.COM [--rig DIR] [--keep DIR]
+#   tests/fndisk-e2e.sh --boot CPM62.h8d --config FNCONFIG.COM [--rig DIR] [--keep DIR]
 #
-# CONFIG.COM must be built with -DH89_RIG_KEYS (` stands in for ESC: the
+# FNCONFIG.COM must be built with -DH89_RIG_KEYS (` stands in for ESC: the
 # rig types only printable keys).
 set -euo pipefail
 
@@ -21,7 +21,7 @@ while [[ $# -gt 0 ]]; do
         --config) CONFIG="$2"; shift 2 ;;
         --rig) RIG="$2"; shift 2 ;;
         --keep) KEEP="$2"; shift 2 ;;
-        *) echo "usage: $0 --boot CPM62.h8d --config CONFIG.COM [--rig DIR] [--keep DIR]" >&2; exit 2 ;;
+        *) echo "usage: $0 --boot CPM62.h8d --config FNCONFIG.COM [--rig DIR] [--keep DIR]" >&2; exit 2 ;;
     esac
 done
 [[ -f "${BOOT}" && -f "${CONFIG}" ]] || { echo "need --boot and --config" >&2; exit 2; }
@@ -46,12 +46,12 @@ printer_on() {
     printf '\n[Printer1]\ntype=0\n' >> "${fn}/fnconfig.ini"
 }
 
-# B: holds CONFIG and FNDISK
+# B: holds FNCONFIG and FNDISK
 mkdir -p "${WORK}/tools"
-cp "${CONFIG}" "${WORK}/tools/CONFIG.COM"
+cp "${CONFIG}" "${WORK}/tools/FNCONFIG.COM"
 cp "${FNDISK}" "${WORK}/tools/FNDISK.COM"
 (cd "${WORK}/tools" && "${APPMAKE}" +cpmdisk -f hz89 --container raw --no-com-file \
-    -b CONFIG.COM -a FNDISK.COM -o disk >/dev/null)
+    -b FNCONFIG.COM -a FNDISK.COM -o disk >/dev/null)
 fixup "${WORK}/tools/disk"
 
 # No room above the BIOS: FNDISK has to say where the BIOS's RAM runs to and
@@ -101,7 +101,7 @@ cp "${BOOT}" "${WORK}/boot.h8d"
 "${RUN}" --roms "${RIG}/tools/roms" --home "${WORK}/home" --timeout 120 \
     --disk "h17:1=${WORK}/boot.h8d" --disk "h17:2=${WORK}/tools/disk" \
     --until 'H:' --type 'B\r' --until 'A>' --wait 1000 \
-    --prompt 'A>' --type 'B:CONFIG\r' --until 'Drive Slots' --until 'Quit' --wait 1500 \
+    --prompt 'A>' --type 'B:FNCONFIG\r' --until 'Drive Slots' --until 'Quit' --wait 1500 \
     --type '\r' --until 'TEST.H8D' --wait 1500 \
     --type 'f' --until 'matching' --type 'TEST*\r' --wait 3000 \
     --type '\r' --until 'Put it in which' --wait 1000 --type '1' --wait 300 --type 'w' \

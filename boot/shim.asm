@@ -1,5 +1,5 @@
 ;-----------------------------------------------------------------------------
-; The HDOS system calls CONFIG makes, with no HDOS: what FNBOOT's stage 2
+; The HDOS system calls FNCONFIG makes, with no HDOS: what FNBOOT's stage 2
 ; leaves under it, at SHIM_ORG
 ;
 ; Copyright (C) 2026 Thomas Cherryhomes
@@ -11,9 +11,9 @@
 ;
 ;   .EXIT   back to the monitor, which starts afresh (RST 0)
 ;   .SCIN   a key from the console's 8250, as it comes: no echo, no editing
-;           (the raw character mode CONFIG asks for)
+;           (the raw character mode FNCONFIG asks for)
 ;   .SCOUT  A to the 8250
-;   others  nothing (.CONSL: CONFIG keeps the console bytes at 20D6H itself)
+;   others  nothing (.CONSL: FNCONFIG keeps the console bytes at 20D6H itself)
 ;-----------------------------------------------------------------------------
 
         include "mtr.inc"

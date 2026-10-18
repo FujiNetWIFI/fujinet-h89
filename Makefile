@@ -96,15 +96,15 @@ $(BUILD)/fn-hdos.h8d: $(BUILD)/FN.DVD $(BUILD)/LP.DVD $(BUILD)/NPIP.ABS tools/hd
 	python3 -I tools/hdosfs.py ls $@.tmp --check >/dev/null
 	mv $@.tmp $@
 
-# CONFIG.COM, FNDISK.COM and NPIP.COM on one H17 CP/M disk:
+# FNCONFIG.COM, FNDISK.COM and NPIP.COM on one H17 CP/M disk:
 #   make tools-disk CONFIG=../fujinet-config/r2r/h89-cpm/config.com
 tools-disk: $(BUILD)/FNDISK.COM $(BUILD)/NPIP.COM tools/cpm-dir-fixup.py
 	@test -n "$(CONFIG)" || { echo "set CONFIG=path/to/config.com" >&2; exit 1; }
 	rm -rf $(BUILD)/tools && mkdir -p $(BUILD)/tools
-	cp $(CONFIG) $(BUILD)/tools/CONFIG.COM
+	cp $(CONFIG) $(BUILD)/tools/FNCONFIG.COM
 	cp $(BUILD)/FNDISK.COM $(BUILD)/NPIP.COM $(BUILD)/tools/
 	cd $(BUILD)/tools && $(APPMAKE) +cpmdisk -f hz89 --container raw --no-com-file \
-	  -b CONFIG.COM -a FNDISK.COM -a NPIP.COM -o disk
+	  -b FNCONFIG.COM -a FNDISK.COM -a NPIP.COM -o disk
 	python3 -I tools/cpm-dir-fixup.py $(BUILD)/tools/disk
 	mv $(BUILD)/tools/disk $(BUILD)/fujinet-cpm.h8d
 
@@ -121,7 +121,7 @@ $(BUILD)/fnboot.bin: $(BOOT_SRC)/fnboot.asm $(BOOT_INC) $(BUILD)/fnboot.org
 	    $$(( org >> 8 )) $$(( org & 255 )); \
 	  test $$org -ge 4096 -o $$(( org + size )) -le 4096 || { echo "FNBOOT runs past the monitor ROM" >&2; rm -f $@; exit 1; }
 
-# Stage 2, sector 0 of the boot image, with the shim it leaves under CONFIG
+# Stage 2, sector 0 of the boot image, with the shim it leaves under FNCONFIG
 $(BUILD)/shim.bin: $(BOOT_SRC)/shim.asm $(BOOT_INC)
 	@mkdir -p $(BUILD)
 	$(Z80ASM) -b -g -m -I=$(BOOT_SRC) -I=common -O=$(BUILD) -r=0x2040 -o=$@ $<
@@ -131,7 +131,7 @@ $(BUILD)/stage2.bin: $(BOOT_SRC)/stage2.asm $(BOOT_INC) $(BUILD)/shim.bin
 	@echo "stage2: $$(stat -c %s $@) bytes (a sector is 512)"
 
 # The boot image for the FujiNet's flash (/autorun.img): stage 2, then
-# CONFIG.ABS:
+# FNCONFIG.ABS:
 #   make autorun CONFIG_ABS=../fujinet-config/r2r/h89-hdos/config.abs
 autorun: $(BUILD)/stage2.bin tools/fnboot.py
 	@test -n "$(CONFIG_ABS)" || { echo "set CONFIG_ABS=path/to/config.abs" >&2; exit 1; }
@@ -147,12 +147,12 @@ monitor-rom: $(BUILD)/fnboot.bin tools/fnboot.py
 check: $(BUILD)/stage2.bin $(BUILD)/fnboot.bin
 	tests/host-tools.sh
 
-# CONFIG.ABS, FN.DVD, LP.DVD and NPIP.ABS on one HDOS disk:
+# FNCONFIG.ABS, FN.DVD, LP.DVD and NPIP.ABS on one HDOS disk:
 #   make hdos-tools-disk CONFIG_ABS=../fujinet-config/r2r/h89-hdos/config.abs
 hdos-tools-disk: $(BUILD)/FN.DVD $(BUILD)/LP.DVD $(BUILD)/NPIP.ABS tools/hdosfs.py
 	@test -n "$(CONFIG_ABS)" || { echo "set CONFIG_ABS=path/to/config.abs" >&2; exit 1; }
 	python3 -I tools/hdosfs.py blank $(BUILD)/fujinet-hdos.h8d.tmp --label "FujiNet for HDOS"
-	python3 -I tools/hdosfs.py put $(BUILD)/fujinet-hdos.h8d.tmp $(CONFIG_ABS) --name CONFIG.ABS
+	python3 -I tools/hdosfs.py put $(BUILD)/fujinet-hdos.h8d.tmp $(CONFIG_ABS) --name FNCONFIG.ABS
 	python3 -I tools/hdosfs.py put $(BUILD)/fujinet-hdos.h8d.tmp $(BUILD)/FN.DVD --name FN.DVD --flags C0
 	python3 -I tools/hdosfs.py put $(BUILD)/fujinet-hdos.h8d.tmp $(BUILD)/LP.DVD --name LP.DVD --flags C0
 	python3 -I tools/hdosfs.py put $(BUILD)/fujinet-hdos.h8d.tmp $(BUILD)/NPIP.ABS --name NPIP.ABS

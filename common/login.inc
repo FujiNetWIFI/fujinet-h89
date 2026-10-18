@@ -1,7 +1,7 @@
 ;-----------------------------------------------------------------------------
 ; Login: only a slot the FujiNet has mounted, holding an H17 image, is a
 ; drive. That keeps the OS off the FujiNet's own boot image and off slots
-; CONFIG has emptied. Returns A = 0 when the slot can be used.
+; FNCONFIG has emptied. Returns A = 0 when the slot can be used.
 ;
 ; Uses slot, buf, cache_slot and fuji_call.
 ;
