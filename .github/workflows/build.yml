@@ -27,9 +27,9 @@ jobs:
       image: fozztexx/defoogi:1.4.8
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: FujiNetWIFI/fujinet-config
           ref: ${{ env.CONFIG_REF }}
@@ -57,7 +57,7 @@ jobs:
           cp fujinet-config/r2r/h89-cpm/config.com dist/CONFIG.COM
           cp fujinet-config/r2r/h89-hdos/config.abs dist/CONFIG.ABS
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: fujinet-h89
           path: dist/
@@ -70,9 +70,9 @@ jobs:
       contents: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: fujinet-h89
           path: dist
