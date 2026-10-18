@@ -8,6 +8,9 @@ CONFIG from the monitor, with no disk. CONFIG, which
 picks the images for the FujiNet's drive slots, is in
 [fujinet-config](https://github.com/FujiNetWIFI/fujinet-config) (`make h89`).
 
+[Releases](https://github.com/FujiNetWIFI/fujinet-h89/releases) have every
+file built: the programs, the drivers, CONFIG, and the disks with them on.
+
 ## FNDISK: FujiNet drives for CP/M
 
 `FNDISK.COM` makes the FujiNet's eight drive slots CP/M drives, D: to K:

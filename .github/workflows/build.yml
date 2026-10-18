@@ -1,0 +1,89 @@
+name: Build
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  pull_request:
+  workflow_dispatch:
+
+env:
+  # CONFIG for the H89 is fujinet-config PR #262; move to main when it merges
+  CONFIG_REF: 92cca0eb2ff26bd7e95926cde592895065741701
+  # Upstream has the 8255 setup-after-reset fix (#136); no release does yet
+  FUJINET_LIB_H89: https://github.com/FujiNetWIFI/fujinet-lib.git#main
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    container:
+      image: fozztexx/defoogi:1.4.8
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/checkout@v4
+        with:
+          repository: FujiNetWIFI/fujinet-config
+          ref: ${{ env.CONFIG_REF }}
+          path: fujinet-config
+
+      - name: Build CONFIG
+        run: make -C fujinet-config FUJINET_LIB_H89="$FUJINET_LIB_H89" h89
+
+      - name: Build
+        run: |
+          make
+          make tools-disk CONFIG=fujinet-config/r2r/h89-cpm/config.com
+          make hdos-tools-disk CONFIG_ABS=fujinet-config/r2r/h89-hdos/config.abs
+          make autorun CONFIG_ABS=fujinet-config/r2r/h89-hdos/config.abs
+
+      - name: Test the host tools
+        run: make check
+
+      - name: Collect
+        run: |
+          mkdir -p dist
+          cp build/{FNDISK.COM,NPIP.COM,fndisk-cpm.h8d,fujinet-cpm.h8d} dist/
+          cp build/{FN.DVD,LP.DVD,NPIP.ABS,fn-hdos.h8d,fujinet-hdos.h8d} dist/
+          cp build/{fnboot.bin,stage2.bin,autorun.img} dist/
+          cp fujinet-config/r2r/h89-cpm/config.com dist/CONFIG.COM
+          cp fujinet-config/r2r/h89-hdos/config.abs dist/CONFIG.ABS
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fujinet-h89
+          path: dist/
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: fujinet-h89
+          path: dist
+
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          { cat .github/release-notes.md
+            echo
+            echo "CONFIG is FujiNetWIFI/fujinet-config@${CONFIG_REF}."
+          } > notes.md
+          gh release create "$GITHUB_REF_NAME" dist/* --title "$GITHUB_REF_NAME" \
+            --notes-file notes.md --generate-notes
