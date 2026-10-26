@@ -10,10 +10,12 @@ on:
   workflow_dispatch:
 
 env:
-  # FNCONFIG for the H89 is fujinet-config PR #262; move to main when it merges
-  CONFIG_REF: 92cca0eb2ff26bd7e95926cde592895065741701
-  # Upstream has the 8255 setup-after-reset fix (#136); no release does yet
-  FUJINET_LIB_H89: https://github.com/FujiNetWIFI/fujinet-lib.git#main
+  # FNCONFIG with the FujiNet logo (fujinet-config branch h89-changes); move to
+  # main when it merges
+  CONFIG_REF: 23d5c98faa0ec516e9a6af0b6b0b73a03d9eb95b
+  # The C2H mode word (fujinet-lib #228) and the drain fix (#155); back to
+  # upstream main when both merge
+  FUJINET_LIB_H89: https://github.com/tschak909/fujinet-lib.git#h89-setup-after-reset
 
 defaults:
   run:
