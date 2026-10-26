@@ -43,9 +43,6 @@ start:
         call    check
         jp      nz,bad_sector
 
-        ld      a,SETUP_MARK    ; the card is set up: FNCONFIG's port_init
-        out     (PORTB),a       ; leaves it be
-
         ; Sector k goes to load + 512 * (k - 1), last first: each reply's
         ; header lands 6 bytes below its sector, in the space of the one
         ; read next (the first's below the program).

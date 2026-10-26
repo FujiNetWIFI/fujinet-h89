@@ -273,10 +273,9 @@ Sector 0 is stage 2 (`boot/stage2.asm`), and `tools/fnboot.py` puts
 `FNCONFIG.ABS` after it. Stage 2:
 
 1. Checks its own reply.
-2. Sets the card's setup mark, so FNCONFIG leaves the card alone.
-3. Loads FNCONFIG to 2A80H, last sector first. Each reply's header lands
+2. Loads FNCONFIG to 2A80H, last sector first. Each reply's header lands
    below its sector, in space that's loaded next.
-4. Runs FNCONFIG in HDOS's place.
+3. Runs FNCONFIG in HDOS's place.
 
 FNCONFIG makes only four HDOS calls (`.SCIN`, `.SCOUT`, `.CONSL`, `.EXIT`).
 `boot/shim.asm` answers them from 2040H, through the monitor's RST 38H
