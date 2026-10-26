@@ -12,7 +12,7 @@ on:
 env:
   # FNCONFIG with the FujiNet logo (fujinet-config branch h89-changes); move to
   # main when it merges
-  CONFIG_REF: 23d5c98faa0ec516e9a6af0b6b0b73a03d9eb95b
+  CONFIG_REF: a4d4ab651e6f0f45f615d94a8a7d5bbe065e1665
   # The C2H mode word (fujinet-lib #228) and the drain fix (#155); back to
   # upstream main when both merge
   FUJINET_LIB_H89: https://github.com/tschak909/fujinet-lib.git#h89-setup-after-reset
