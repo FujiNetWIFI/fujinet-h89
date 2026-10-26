@@ -25,8 +25,8 @@
         include "fnboot.inc"
 
 boot:
-        ld      a,0xC0          ; port A mode 2: port C's outputs go low, EN
-        out     (PCTRL),a       ; with them, and the ESP32 stops
+        ld      a,0xC2          ; port A mode 2, port B in: port C's outputs
+        out     (PCTRL),a       ; go low, EN with them, and the ESP32 stops
         ld      a,50
         call    MTR_DLY         ; for 100 ms
         ld      a,0x06          ; EN and IO0 high at once: it starts its
