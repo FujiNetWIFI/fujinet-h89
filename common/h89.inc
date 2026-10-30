@@ -9,10 +9,6 @@ PCTRL           equ     0xD3
 PC_OBF          equ     0x80    ; /OBF: 1 = the byte we wrote has been taken
 PC_IBF          equ     0x20    ; IBF: 1 = a byte from the ESP32 is waiting
 
-DIR_TO_H89      equ     0x00    ; port C bit set/reset: PC0=0, the 245 drives toward the H89
-DIR_TO_ESP      equ     0x01    ; PC0=1, toward the ESP32
-OE_ON           equ     0x02    ; PC1=0, the 245 enabled
-
 ; SLIP
 SLIP_END        equ     0xC0
 SLIP_ESC        equ     0xDB

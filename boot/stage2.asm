@@ -10,8 +10,8 @@
 ; at SHIM_ORG under it, and its console bytes and tick counter are where HDOS
 ; keeps them (the tick is the monitor's own).
 ;
-; Comes in from FNBOOT with the card running and facing the H89, interrupts
-; on, the monitor's stack (kept to the end), and FNBOOT's reply just below:
+; Comes in from FNBOOT with the card running, interrupts on, the monitor's
+; stack (kept to the end), and FNBOOT's reply just below:
 ; its 6-byte header at 227AH.
 ;
 ; tools/fnboot.py fills in the parameter block and puts the program after.
@@ -139,8 +139,6 @@ send_request:
         add     a,DEV_DISK + CMD_READ + 7 + FIELDS_U8
         adc     a,0
         ld      (req_cksum),a
-        ld      a,DIR_TO_ESP
-        out     (PCTRL),a
         ld      a,SLIP_END
         call    putc
         ld      hl,req
@@ -165,8 +163,6 @@ req_put:
         djnz    req_next
         ld      a,SLIP_END
         call    putc
-        ld      a,DIR_TO_H89
-        out     (PCTRL),a
         ret
 
 ; Send A, and wait for the ESP32 to take it
