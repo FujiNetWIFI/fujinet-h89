@@ -29,12 +29,10 @@ boot:
         out     (PCTRL),a       ; go low, EN with them, and the ESP32 stops
         ld      a,50
         call    MTR_DLY         ; for 100 ms
-        ld      a,0x06          ; EN and IO0 high at once: it starts its
-        out     (PORTC),a       ; firmware
+        ld      a,0x04          ; EN high: it starts its firmware
+        out     (PORTC),a
         ld      a,100
         call    MTR_DLY         ; 200 ms while it reads its straps
-        ld      a,0x05          ; then /OE low (IO0 is done with), and DIR
-        out     (PORTC),a       ; toward the ESP32
 
         ld      hl,request
         ld      b,REQUEST_SIZE
@@ -47,8 +45,6 @@ send_wait:
         jr      nc,send_wait
         inc     hl
         djnz    send
-        xor     a               ; DIR_TO_H89
-        out     (PCTRL),a
 
 sync:
         call    getc            ; to the reply's first END

@@ -53,10 +53,6 @@ ENDIF
         ld      (req_cks),a
 
         ; Send: one END, the packet, one END
-        ld      a,OE_ON
-        out     (PCTRL),a
-        ld      a,DIR_TO_ESP
-        out     (PCTRL),a
         ld      hl,TX_TIMEOUT
         ld      (tlimit),hl
         ld      a,SLIP_END
@@ -73,8 +69,6 @@ ENDIF
         ld      a,SLIP_END
         call    putc
         call    tx_wait
-        ld      a,DIR_TO_H89
-        out     (PCTRL),a
 
         ; Receive: skip to an END, past any more, then decode to the next
         ld      hl,RX_FIRST
@@ -172,8 +166,6 @@ IFDEF FUJI_DRAIN
         ld      a,1
         ld      (bus_dirty),a   ; its reply may still be coming
 ENDIF
-        ld      a,DIR_TO_H89
-        out     (PCTRL),a
         ld      sp,(abort_sp)
         ld      a,1
         or      a
@@ -333,8 +325,6 @@ DRAIN_QUIET     equ     50
 drain:
         xor     a
         ld      (bus_dirty),a
-        ld      a,DIR_TO_H89
-        out     (PCTRL),a
         ld      hl,DRAIN_QUIET
         ld      (tlimit),hl
         ld      bc,2048
