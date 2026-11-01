@@ -2,6 +2,10 @@ FujiNet for the Heathkit H89 and the H89-ESP32 FujiNet card. The
 [README](https://github.com/FujiNetWIFI/fujinet-h89#readme) says how to use
 each file.
 
+This release is for the card without its 74LVC245 (needs
+FujiNetWIFI/fujinet-firmware#2232). Cards that still have the 245 should stay
+on v1.0.4.
+
 H17 disks (`.h8d`):
 - `fujinet-cpm.h8d`: FNCONFIG.COM, FNDISK.COM and NPIP.COM, for CP/M
 - `fujinet-hdos.h8d`: FNCONFIG.ABS, FN.DVD, LP.DVD and NPIP.ABS, for HDOS 2.0
