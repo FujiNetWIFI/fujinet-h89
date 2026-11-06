@@ -6,6 +6,11 @@ This release is for the card without its 74LVC245 (needs
 FujiNetWIFI/fujinet-firmware#2232). Cards that still have the 245 should stay
 on v1.0.4.
 
+`FNDISK.COM` no longer needs a 62K system: it installs at the top of the TPA,
+below the CCP, on the system as it boots (64K, or a BIOS with CF, RTC or LPT
+drivers), and lowers the BDOS address to itself. It takes about 2.5K of the
+TPA.
+
 H17 disks (`.h8d`):
 - `fujinet-cpm.h8d`: FNCONFIG.COM, FNDISK.COM and NPIP.COM, for CP/M
 - `fujinet-hdos.h8d`: FNCONFIG.ABS, FN.DVD, LP.DVD and NPIP.ABS, for HDOS 2.0

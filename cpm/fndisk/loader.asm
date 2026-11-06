@@ -9,19 +9,21 @@
 ;                   system)
 ;   FNDISK x        slot 1 on drive x:, the rest after it
 ;
-; Copies the resident part above the BIOS and points the BIOS jump table's
-; disk entries at it, and its LIST, LISTST and WBOOT, then sets LST: to UL1:
-; and warm boots so CP/M starts with the new drives.
-; The resident part runs from res_start (F720H) to the top of memory, so the
-; BIOS's RAM has to end below it. A stock 62K system's does (MOVCPM17 62 *,
-; then SYSGEN); a BIOS with more in it (CF, RTC, LPT) needs a smaller
-; system, and FNDISK says how many K smaller.
+; Copies the resident part to the top of the TPA, just below the CCP (or
+; below whatever already lowered the BDOS address at 0006H), relocated to
+; the page it lands on, and lowers 0006H to it so programs stop short of it.
+; Points the BIOS jump table's disk entries at it, and its LIST, LISTST and
+; WBOOT, then sets LST: to UL1: and warm boots so CP/M starts with the new
+; drives. It takes whole pages: about 2.5K off the TPA, on whatever BIOS.
 ;-----------------------------------------------------------------------------
 
         include "h89.inc"
 
 TICKS           equ     0x000B  ; the Heath BIOS's 2 ms tick counter
-        include "resident.def"
+        include "resident.def"  ; offsets into the resident part
+
+VERSION         equ     3
+CCP_TO_BIOS     equ     0x1600  ; the CCP (800H) and BDOS (0E00H) below the BIOS
 
 BDOS            equ     5
 B_CONOUT        equ     2
@@ -30,7 +32,6 @@ B_PRINT         equ     9
 BIOS_WBOOT      equ     0x03    ; Heath's BIOS: its jump table entries...
 BIOS_LIST       equ     0x0F
 BIOS_VERSION    equ     0x33    ; ...version byte, 04
-BIOS_RAM_END    equ     0x4B    ; ...first byte above its RAM
 BIOS_HOME       equ     0x18    ; HOME..LISTST: 8 entries
 BIOS_SELDSK     equ     0x1B
 BIOS_DPH0       equ     0x52    ; its first drive's DPH
@@ -55,77 +56,104 @@ start:
         cp      4
         jp      nz,not_heath
 
-        ; Already in? Then the BIOS's SELDSK entry jumps to us.
         ld      hl,(bios)
-        ld      de,BIOS_SELDSK + 1
+        ld      de,BIOS_SELDSK
         add     hl,de
+        ld      (bios_seldsk_at),hl
+        inc     hl
         ld      e,(hl)
         inc     hl
         ld      d,(hl)
-        ld      hl,do_seldsk
-        or      a
-        sbc     hl,de
-        jp      z,already
-        ; Somewhere else up there: another FNDISK, where this one would go
-        ld      hl,res_start - 1
-        or      a
-        sbc     hl,de
-        jp      c,another
+        ld      (seldsk_target),de
 
-        ; Room above the BIOS? An end that isn't above it wrapped: its RAM
-        ; runs to the top of memory.
-        ld      hl,(bios)
-        ld      de,BIOS_RAM_END
+        ; Already in? Then the BIOS's SELDSK entry jumps to our do_seldsk, in
+        ; a copy that starts on a page.
+        ex      de,hl
+        ld      de,do_seldsk
+        or      a
+        sbc     hl,de           ; where that copy would start
+        ld      a,l
+        or      a
+        jr      nz,not_in
+        ld      (installed),hl
+        ld      de,sig
         add     hl,de
-        ld      e,(hl)
-        inc     hl
-        ld      d,(hl)
-        ld      (ram_end),de
+        call    same_sig
+        jr      nz,not_in
+        ld      de,version - sig
+        add     hl,de
+        ld      a,(hl)
+        cp      VERSION
+        jp      nz,another
+        jp      already
+not_in:
+        ; An FNDISK 1 or 2 has its signature first, at F720H
+        ld      hl,(seldsk_target)
+        ld      de,0xF720
+        or      a
+        sbc     hl,de
+        jr      c,fresh
+        ld      hl,0xF720
+        call    same_sig
+        jp      z,another
+fresh:
+        ; The top of the TPA: below the CCP, or where 0006H points if that is
+        ; lower (something else is in above us)
         ld      hl,(bios)
+        ld      de,-CCP_TO_BIOS
+        add     hl,de
+        ld      de,(6)
+        push    hl
         or      a
         sbc     hl,de
-        jr      c,ram_end_ok
-        ld      hl,0
-        ld      (ram_end),hl
-        jp      no_room
-ram_end_ok:
-        ld      hl,res_start
+        pop     hl
+        jr      c,top_found     ; the CCP is lower
+        ex      de,hl
+top_found:
+        ld      de,res_end
         or      a
         sbc     hl,de
-        jp      c,no_room
+        jp      c,no_memory
+        ld      l,0             ; the page it can start on
+        ld      de,buf_end + 64 ; clear of this program and its buffer
+        push    hl
+        or      a
+        sbc     hl,de
+        pop     hl
+        jp      c,no_memory
+        ld      (base),hl
 
         call    card_on
         call    card_present
         jp      nz,no_card
 
-        ld      hl,image
-        ld      de,res_start
-        ld      bc,image_end - image
-        ldir
-
-        ; The BIOS's own HOME..LISTST, LIST and WBOOT entries, for the driver
-        ; to pass calls on
+        ; Fill in the image where it is: the BIOS's own HOME..LISTST, LIST
+        ; and WBOOT entries, for the driver to pass calls on...
         ld      hl,(bios)
         ld      de,BIOS_HOME
         add     hl,de
-        ld      de,bios_jumps
+        ld      de,image + bios_jumps
         ld      bc,NHOOKS * 3
         ldir
         ld      de,BIOS_LIST
-        ld      hl,bios_list
+        ld      hl,image + bios_list
         call    bios_entry
         ld      de,BIOS_WBOOT
-        ld      hl,bios_wboot
+        ld      hl,image + bios_wboot
         call    bios_entry
 
-        ; All drives share the BIOS's directory buffer
+        ; ...the BDOS entry it goes on to...
+        ld      hl,(6)
+        ld      (image + bdos_entry + 1),hl
+
+        ; ...and the BIOS's directory buffer, which all the drives share
         ld      hl,(bios)
         ld      de,BIOS_DPH0 + DPH_DIRBUF
         add     hl,de
         ld      e,(hl)
         inc     hl
         ld      d,(hl)
-        ld      hl,dph_table + DPH_DIRBUF
+        ld      hl,image + dph_table + DPH_DIRBUF
         ld      b,NDRIVES
 set_dirbuf:
         ld      (hl),e
@@ -139,10 +167,28 @@ set_dirbuf:
 
         call    choose_drive
         jp      c,no_letters
-        ld      (first_drive),a
+        ld      (drive0),a
+        ld      (image + first_drive),a
 
-        ; Hand the entries over
-        ld      hl,hooks
+        call    relocate
+
+        ; In place, with its buffers cleared
+        ld      hl,image
+        ld      de,(base)
+        ld      bc,res_bss
+        ldir
+        ld      hl,(base)
+        ld      de,res_bss
+        add     hl,de
+        ld      (hl),0
+        ld      d,h
+        ld      e,l
+        inc     de
+        ld      bc,res_end - res_bss - 1
+        ldir
+
+        ; Hand the entries over (the relocated jumps in image)
+        ld      hl,image + hooks
         ex      de,hl
         ld      hl,(bios)
         ld      bc,BIOS_HOME
@@ -151,16 +197,26 @@ set_dirbuf:
         ld      bc,NHOOKS * 3
         ldir
         ld      de,BIOS_LIST
-        ld      hl,list_hook
+        ld      hl,image + list_hook
         call    hook_entry
         ld      de,BIOS_WBOOT
-        ld      hl,wboot_hook
+        ld      hl,image + wboot_hook
         call    hook_entry
+
+        ld      hl,(base)       ; programs stop short of it
+        ld      (6),hl
 
         ld      a,(3)           ; LST: = UL1:, the FujiNet's printer
         or      0xC0
         ld      (3),a
 
+        ld      hl,(base)
+        ld      de,msg_base
+        call    hex_word
+        ld      hl,(base)
+        dec     hl
+        ld      de,msg_tpa
+        call    hex_word
         ld      de,msg_installed
         call    print
         call    list_drives
@@ -168,7 +224,58 @@ set_dirbuf:
         call    print
         jp      0
 
+; Add the page it is loading at to each byte of the image that is the high
+; byte of an address: resident.bits has a bit for each byte of the image
+relocate:
+        ld      a,(base + 1)
+        ld      (page),a
+        ld      hl,image
+        ld      de,image_bits
+        ld      b,(image_bits_end - image_bits) & 0xFF
+reloc_group:
+        ld      a,(de)
+        inc     de
+        ld      c,8
+reloc_bit:
+        rrca
+        jr      nc,reloc_next
+        push    af
+        ld      a,(page)
+        add     a,(hl)
+        ld      (hl),a
+        pop     af
+reloc_next:
+        inc     hl
+        dec     c
+        jr      nz,reloc_bit
+        djnz    reloc_group
+        ret
+
+; Z if the six bytes at HL (kept) are "FNDISK"
+same_sig:
+        push    hl
+        ld      de,sig_text
+        ld      b,6
+same_sig_next:
+        ld      a,(de)
+        cp      (hl)
+        jr      nz,same_sig_done
+        inc     hl
+        inc     de
+        djnz    same_sig_next
+same_sig_done:
+        pop     hl
+        ret
+
 already:
+        ld      hl,(installed)
+        ld      de,first_drive
+        add     hl,de
+        ld      a,(hl)
+        ld      (drive0),a
+        ld      hl,(installed)
+        ld      de,msg_where
+        call    hex_word
         ld      de,msg_already
         call    print
         call    list_drives
@@ -189,26 +296,8 @@ fail:
         call    print
         jp      0
 
-; Where the BIOS's RAM runs to, where ours starts, and how many K smaller a
-; system has to be (MOVCPM17 moves it all 400H a K): the 1 to 3K the RAM end
-; is past res_start, rounded up
-no_room:
-        ld      hl,(ram_end)
-        dec     hl              ; its last byte
-        ld      de,msg_ram_top
-        call    hex_word
-        ld      hl,res_start
-        ld      de,msg_res_start
-        call    hex_word
-        ld      hl,(ram_end)
-        ld      de,0x103FF - res_start
-        add     hl,de
-        ld      a,h
-        srl     a
-        srl     a
-        add     a,'0'
-        ld      (msg_smaller),a
-        ld      de,msg_no_room
+no_memory:
+        ld      de,msg_no_memory
         jr      fail
 
 ; HL as 4 hex digits at DE
@@ -298,6 +387,10 @@ probe_found:
         ccf
         ret
 
+bios_seldsk:
+        ld      hl,(bios_seldsk_at)
+        jp      (hl)
+
 ; Copy the BIOS's jump table entry at offset DE to HL
 bios_entry:
         push    hl
@@ -319,6 +412,7 @@ copy_entry:
         ret
 
         include "card.inc"
+        include "fujibus.inc"
 
 ;-----------------------------------------------------------------------------
 ; Which image is in each drive now
@@ -346,7 +440,7 @@ list_slots:
 list_next:
         push    bc
         push    hl
-        ld      a,(first_drive)
+        ld      a,(drive0)
         add     a,b
         add     a,'A'
         ld      (msg_letter),a
@@ -411,15 +505,14 @@ print:
 ;-----------------------------------------------------------------------------
 
 msg_banner:     defm    "FNDISK: FujiNet drives for H89 CP/M", 13, 10, "$"
-msg_installed:  defm    "Installed.", 13, 10, "$"
-msg_already:    defm    "Already installed.", 13, 10, "$"
+msg_installed:  defm    "Installed at "
+msg_base:       defm    "xxxxH; the TPA ends at "
+msg_tpa:        defm    "xxxxH.", 13, 10, "$"
+msg_already:    defm    "Already installed at "
+msg_where:      defm    "xxxxH.", 13, 10, "$"
 msg_another:    defm    "Another FNDISK is installed. Boot again, then run this one.", 13, 10, "$"
 msg_not_heath:  defm    "Needs Heath/Zenith CP/M 2.2.04.", 13, 10, "$"
-msg_no_room:    defm    "No room above the BIOS: its RAM runs to "
-msg_ram_top:    defm    "xxxxH, FNDISK's starts at "
-msg_res_start:  defm    "xxxxH.", 13, 10
-                defm    "Make a system "
-msg_smaller:    defm    "nK smaller (MOVCPM17, then SYSGEN) and boot that.", 13, 10, "$"
+msg_no_memory:  defm    "Not enough memory below the CCP.", 13, 10, "$"
 msg_no_letters: defm    "No 8 free drive letters there.", 13, 10, "$"
 msg_no_fujinet: defm    "The FujiNet isn't answering.", 13, 10, "$"
 msg_no_card:    defm    "No FujiNet card (82C55 at 0D0H) found.", 13, 10, "$"
@@ -431,10 +524,18 @@ msg_empty:      defm    "-$"
 msg_ro:         defm    " (read only)$"
 msg_rw:         defm    " (read/write)$"
 msg_eol:        defm    13, 10, "$"
+sig_text:       defm    "FNDISK"
 
 bios:           defw    0
-ram_end:        defw    0       ; first byte above the BIOS's RAM; 0 = the top
+bios_seldsk_at: defw    0
+seldsk_target:  defw    0
+installed:      defw    0       ; where our copy is, if it is
+base:           defw    0       ; where this one is going
+drive0:         defb    0       ; CP/M drive number of slot 1
 free_drive:     defb    0
+page:           defb    0
+
+                include "fujibus-vars.inc"
 
                 defs    64
 stack_top:
@@ -442,3 +543,8 @@ stack_top:
 image:
         binary  "resident.bin"
 image_end:
+image_bits:
+        binary  "resident.bits"
+image_bits_end:
+buf             equ     $
+buf_end         equ     buf + SLOTS_SIZE

@@ -4,9 +4,13 @@
 # slot 1 with FNCONFIG, load FNDISK, then read, write and warm boot on D:, and
 # check on the host that the file written is in the image. Then print on
 # UL1: (the FujiNet's printer) and on CRT:, and check what the printer got.
-# First, check what FNDISK says where there's no room above the BIOS.
+# First, check where FNDISK puts itself on a 64K system, a 62K one and one
+# with something already below the CCP.
 #
-#   tests/fndisk-e2e.sh --boot CPM62.h8d --config FNCONFIG.COM [--rig DIR] [--keep DIR]
+#   tests/fndisk-e2e.sh --config FNCONFIG.COM [--boot CPM62.h8d] [--rig DIR] [--keep DIR]
+#
+# The main run is on the rig's 64K CP/M; --boot is a 62K one (make it with
+# make-62k-boot.sh), which is also checked if given.
 #
 # FNCONFIG.COM must be built with -DH89_RIG_KEYS (` stands in for ESC: the
 # rig types only printable keys).
@@ -21,11 +25,13 @@ while [[ $# -gt 0 ]]; do
         --config) CONFIG="$2"; shift 2 ;;
         --rig) RIG="$2"; shift 2 ;;
         --keep) KEEP="$2"; shift 2 ;;
-        *) echo "usage: $0 --boot CPM62.h8d --config FNCONFIG.COM [--rig DIR] [--keep DIR]" >&2; exit 2 ;;
+        *) echo "usage: $0 --config FNCONFIG.COM [--boot CPM62.h8d] [--rig DIR] [--keep DIR]" >&2; exit 2 ;;
     esac
 done
-[[ -f "${BOOT}" && -f "${CONFIG}" ]] || { echo "need --boot and --config" >&2; exit 2; }
 RUN="${RIG}/build/core/h89_session_run"
+BOOT64="${RIG}/tools/disks/boot/cpm-2.2.04-64k.h8d"
+[[ -f "${BOOT64}" && -f "${CONFIG}" ]] || { echo "need --config (and the rig's 64K CP/M)" >&2; exit 2; }
+[[ -z "${BOOT}" || -f "${BOOT}" ]] || { echo "no such --boot ${BOOT}" >&2; exit 2; }
 APPMAKE="${APPMAKE:-z88dk-appmake}"
 FNDISK="${ROOT}/build/FNDISK.COM"
 [[ -f "${FNDISK}" ]] || { echo "build FNDISK.COM first (make)" >&2; exit 2; }
@@ -54,34 +60,43 @@ cp "${FNDISK}" "${WORK}/tools/FNDISK.COM"
     -b FNCONFIG.COM -a FNDISK.COM -o disk >/dev/null)
 fixup "${WORK}/tools/disk"
 
-# No room above the BIOS: FNDISK has to say where the BIOS's RAM runs to and
-# how many K smaller to make the system. The rig's 64K system; then the 62K
-# one with the BIOS's RAM end (BIOS+4BH, the BIOS at E600H) poked to FB40H,
-# as a BIOS with more drivers in it (CF, RTC, LPT) has, and to 0000H, a BIOS
-# whose RAM runs to the top of memory.
-no_room() {     # $1 = name, $2 = boot disk, $3 = RAM end to poke or "", $4 = its last byte, $5 = K
-    local log="${WORK}/$1.log" poke=()
+# Where it goes: just below the CCP (BIOS - 1600H), or below where 0006H
+# points if that is lower, in whole pages, and 0006H follows it: after
+# installing, and after a warm boot and a second run (which says where it is).
+# The resident part and its buffers are 8D7H bytes (make prints it).
+#   $1 = name, $2 = boot disk, $3 = poke to 0007H or "", $4 = base's high byte
+install_at() {
+    local log="${WORK}/$1.log" poke=() hi="$4" top="${4:0:2}"
     cp "$2" "${WORK}/$1.h8d"
-    [[ -z "$3" ]] || poke=(--debug 'radix hex' --debug 'mem 1 2'
-                           --debug "poke 0xe64b \$${3:2:2} \$${3:0:2}")
-    "${RUN}" --roms "${RIG}/tools/roms" --home "${WORK}/$1" --timeout 60 \
+    [[ -z "$3" ]] || poke=(--debug "poke 0x7 \$$3"       # and an RSX's entry there: JP E006H
+                           --debug "poke 0x$306 \$c3 \$06 \$e0")
+    "${RUN}" --roms "${RIG}/tools/roms" --home "${WORK}/$1" --timeout 90 \
         --disk "h17:1=${WORK}/$1.h8d" --disk "h17:2=${WORK}/tools/disk" \
-        --until 'H:' --type 'B\r' --until 'A>' --wait 1000 ${poke[@]+"${poke[@]}"} \
-        --type 'B:FNDISK\r' --until 'boot that' --prompt 'A>' --wait 500 --screen \
+        --until 'H:' --type 'B\r' --until 'A>' --wait 1000 --debug 'radix hex' \
+        ${poke[@]+"${poke[@]}"} \
+        --type 'B:FNDISK\r' --until 'Installed at' --prompt 'A>' --wait 500 --screen \
+        --debug 'mem 6 2' \
+        --type '\x03' --wait 1500 \
+        --type 'B:FNDISK\r' --until 'Already installed at' --prompt 'A>' --wait 500 --screen \
+        --debug 'mem 6 2' \
         > "${log}" 2>&1 || { grep -E 'timed out|failed' "${log}" >&2 || true
             sed -n '/---- screen ----/,/^\(\[fujinet\] \)\?----------------/p' "${log}" | sed 's/^\[fujinet\] //' | tail -8 >&2
-            echo "FAIL: no room ($1): the run stopped" >&2; exit 1; }
-    if [[ -n "$3" ]] && ! grep -Eq '^(\[fujinet\] )?0001 +03 E6' "${log}"; then
-        echo "FAIL: no room ($1): the boot disk's BIOS isn't at E600H (make it with make-62k-boot.sh)" >&2; exit 1
-    fi
-    grep -q "its RAM runs to $4H, FNDISK's starts at F720H\." "${log}" \
-        && grep -q "Make a system $5K smaller" "${log}" \
-        || { grep -A2 'No room' "${log}" >&2; echo "FAIL: no room ($1): want $4H and ${5}K" >&2; exit 1; }
-    echo "PASS: no room ($1): its RAM runs to $4H, ${5}K smaller"
+            echo "FAIL: install at ($1): the run stopped" >&2; exit 1; }
+    grep -q "Installed at ${hi}00H; the TPA ends at $(printf '%02X' $((0x${hi} - 1)))FFH\." "${log}" \
+        && grep -q "Already installed at ${hi}00H\." "${log}" \
+        || { grep -E 'nstalled|Not enough' "${log}" >&2; echo "FAIL: install at ($1): want ${hi}00H" >&2; exit 1; }
+    # 0006H holds 00 ${hi} (little-endian)
+    [[ $(grep -cE "^(\[fujinet\] )?0006 +00 ${hi}" "${log}") -ge 2 ]] \
+        || { grep -E '^(\[fujinet\] )?0006' "${log}" >&2
+             echo "FAIL: install at ($1): 0006H isn't ${hi}00H after install and warm boot" >&2; exit 1; }
+    echo "PASS: install at ($1): ${hi}00H, 0006H lowered to it, kept by the warm boot"
 }
-no_room 64k "${RIG}/tools/disks/boot/cpm-2.2.04-64k.h8d" "" FF11 2
-no_room bigger-bios "${BOOT}" FB40 FB3F 2
-no_room to-the-top "${BOOT}" 0000 FFFF 3
+# the 64K system: BIOS EE00H, CCP D800H, so CF00H
+install_at 64k "${BOOT64}" "" CF
+# something already lowered the BDOS address to C0xxH: below that, B700H
+install_at below-an-rsx "${BOOT64}" c0 B7
+# the 62K system: BIOS E600H, CCP D000H, so C700H
+[[ -z "${BOOT}" ]] || install_at 62k "${BOOT}" "" C7
 
 # The FujiNet's SD card: an H17 CP/M disk with text files on it. PRINT.TXT
 # has a line longer than FNDISK's print buffer, and a last one with no end,
@@ -96,7 +111,7 @@ printf '\311' > "${WORK}/test/STUB.COM"
     -b STUB.COM -a HELLO.TXT -a PRINT.TXT -o disk >/dev/null)
 fixup "${WORK}/test/disk"
 cp "${WORK}/test/disk" "${SD}/TEST.H8D"
-cp "${BOOT}" "${WORK}/boot.h8d"
+cp "${BOOT64}" "${WORK}/boot.h8d"
 
 "${RUN}" --roms "${RIG}/tools/roms" --home "${WORK}/home" --timeout 120 \
     --disk "h17:1=${WORK}/boot.h8d" --disk "h17:2=${WORK}/tools/disk" \
@@ -107,11 +122,11 @@ cp "${BOOT}" "${WORK}/boot.h8d"
     --type '\r' --until 'Put it in which' --wait 1000 --type '1' --wait 300 --type 'w' \
     --until 'TEST.H8D' --wait 1500 --type '`' --until 'Mount drives' --wait 1500 \
     --type '`' --until 'FujiNet drives' --prompt 'A>' --wait 500 \
-    --type 'B:FNDISK\r' --until 'Installed' --until 'LST: is UL1:' --prompt 'A>' --wait 500 --screen \
+    --type 'B:FNDISK\r' --until 'Installed at' --until 'LST: is UL1:' --prompt 'A>' --wait 500 --screen \
     --type 'DIR D:\r' --until 'HELLO' --prompt 'A>' --wait 500 \
     --type 'TYPE D:HELLO.TXT\r' --until 'second line' --prompt 'A>' --wait 500 \
     --type 'PIP D:=B:FNDISK.COM\r' --prompt 'A>' --wait 500 \
-    --type 'B:FNDISK\r' --until 'Already installed' --prompt 'A>' --wait 500 \
+    --type 'B:FNDISK\r' --until 'Already installed at' --prompt 'A>' --wait 500 \
     --type 'DIR D:\r' --until 'FNDISK' --prompt 'A>' --wait 500 \
     --type 'STAT D:\r' --until 'Bytes Remaining On D:' --prompt 'A>' --wait 500 \
     --type 'PIP LST:=D:HELLO.TXT\r' --prompt 'A>' --wait 500 \

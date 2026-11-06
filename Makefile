@@ -10,10 +10,6 @@ Z80ASM  ?= z88dk-z80asm
 APPMAKE ?= z88dk-appmake
 BUILD   := build
 
-# Where the resident part of FNDISK lives: above the BIOS of a 62K system,
-# whose RAM ends at F711H, to the top of memory
-FNDISK_ORG ?= 0xF720
-
 # Where FNBOOT is assembled: the unused bytes at the end of MTR-90 (from
 # 0F65H in 444-142, 0F25H in 444-84); 0x1000 for an EPROM of its own; or RAM
 # clear of 2040H-BB68H, such as 0xC000
@@ -34,15 +30,26 @@ all: $(BUILD)/FNDISK.COM $(BUILD)/NPIP.COM $(BUILD)/fndisk-cpm.h8d $(BUILD)/FN.D
      $(BUILD)/LP.DVD $(BUILD)/NPIP.ABS $(BUILD)/fn-hdos.h8d $(BUILD)/fnboot.bin \
      $(BUILD)/stage2.bin
 
-$(BUILD)/resident.bin: $(FNDISK_SRC)/resident.asm $(COMMON)
-	@mkdir -p $(BUILD)
-	$(Z80ASM) -b -g -m -I=$(FNDISK_SRC) -I=common -O=$(BUILD) -r=$(FNDISK_ORG) -o=$@ $<
-	@size=$$(stat -c %s $@); room=$$(( 0x10000 - $(FNDISK_ORG) )); \
-	  echo "resident: $$size bytes at $(FNDISK_ORG), room for $$room"; \
-	  test $$size -le $$room || { echo "resident part doesn't fit" >&2; exit 1; }
+# The resident part of FNDISK is assembled at 0 and at 100H; mkreloc.py finds
+# the address bytes from the difference, and the loader fixes them up for
+# wherever below the CCP it lands.
+$(BUILD)/fndisk0/resident.bin: $(FNDISK_SRC)/resident.asm $(COMMON)
+	@mkdir -p $(BUILD)/fndisk0
+	$(Z80ASM) -b -g -m -I=$(FNDISK_SRC) -I=common -O=$(BUILD)/fndisk0 -r=0x0000 -o=$@ $<
 
-$(BUILD)/FNDISK.COM: $(FNDISK_SRC)/loader.asm $(COMMON) $(BUILD)/resident.bin
-	$(Z80ASM) -b -m -I=$(FNDISK_SRC) -I=common -I=$(BUILD) -O=$(BUILD) -r=0x100 -o=$@ $<
+$(BUILD)/fndisk1/resident.bin: $(FNDISK_SRC)/resident.asm $(COMMON)
+	@mkdir -p $(BUILD)/fndisk1
+	$(Z80ASM) -b -g -m -I=$(FNDISK_SRC) -I=common -O=$(BUILD)/fndisk1 -r=0x0100 -o=$@ $<
+
+$(BUILD)/fndisk/resident.bin: $(BUILD)/fndisk0/resident.bin $(BUILD)/fndisk1/resident.bin tools/mkreloc.py
+	@mkdir -p $(BUILD)/fndisk
+	python3 -I tools/mkreloc.py --def $(BUILD)/fndisk0/resident.def \
+	  $(BUILD)/fndisk0/resident.bin $(BUILD)/fndisk1/resident.bin \
+	  -o $@ --bits $(BUILD)/fndisk/resident.bits
+	cp $(BUILD)/fndisk0/resident.def $(BUILD)/fndisk/resident.def
+
+$(BUILD)/FNDISK.COM: $(FNDISK_SRC)/loader.asm $(COMMON) $(BUILD)/fndisk/resident.bin
+	$(Z80ASM) -b -m -I=$(FNDISK_SRC) -I=common -I=$(BUILD)/fndisk -O=$(BUILD) -r=0x100 -o=$@ $<
 
 # NPIP, the same core with each system's part, assembled where its map
 # won't meet the other's

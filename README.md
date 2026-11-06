@@ -34,15 +34,13 @@ A>PIP LST:=D:README.TXT
   as z88dk's `appmake +cpmdisk -f hz89`). A slot is a drive only while the
   FujiNet has an image mounted in it and its name ends in `.h8d`; any other
   slot gives `Bdos Err On x: Select`.
-- **It needs a system smaller than 64K.** The driver stays resident from
-  F720H to the top of memory, so the BIOS's RAM has to end below that.
-  Heath's own BIOS does at 62K: make one once with `MOVCPM17 62 *` and then
-  `SYSGEN` onto the boot disk. A BIOS with more in it (CF, RTC, LPT drivers)
-  needs a smaller system still, and FNDISK says how many K smaller:
+- **It runs on the system as it is:** 64K, smaller, or with a bigger BIOS
+  (CF, RTC, LPT drivers). No MOVCPM needed. The driver sits at the top of the
+  TPA, just below the CCP, and takes whole pages (about 2.5K), so the TPA
+  ends there instead of at the BDOS. FNDISK says where:
 
   ```
-  No room above the BIOS: its RAM runs to FB3FH, FNDISK's starts at F720H.
-  Make a system 2K smaller (MOVCPM17, then SYSGEN) and boot that.
+  Installed at CF00H; the TPA ends at CEFFH.
   ```
 - `FNDISK x` puts slot 1 on drive x: instead (not one of the BIOS's own).
   Running it again lists the drives.
@@ -59,13 +57,21 @@ A>PIP LST:=D:README.TXT
 
 ### How it works
 
-FNDISK copies its resident part to F720H and points the BIOS jump table's
-disk entries (HOME to WRITE), and LIST, LISTST and WBOOT, at it. Calls for
-the BIOS's drives go straight on; calls for a FujiNet drive are served over
-FujiBus: the FujiNet serves an image as 512-byte sectors, and a CP/M record
-is a quarter of one. Reads keep the last sector; writes go through at once.
-A warm boot reloads only the CCP and BDOS, so the jump table stays as FNDISK
-left it.
+FNDISK copies its resident part to the page below the CCP (the BIOS less
+1600H; or below where 0006H points, if something already lowered it), and
+adds that page to each address in it: `tools/mkreloc.py` finds them by
+comparing builds at 0 and at 100H. It lowers the BDOS address at 0006H to
+the driver, which passes BDOS calls on, so programs stop short of it. Then
+it points the BIOS jump table's disk entries (HOME to WRITE), and LIST,
+LISTST and WBOOT, at it. Calls for the BIOS's drives go straight on; calls
+for a FujiNet drive are served over FujiBus: the FujiNet serves an image as
+512-byte sectors, and a CP/M record is a quarter of one. Reads keep the
+last sector; writes go through at once.
+
+A warm boot reloads the CCP and BDOS, and with them 0006H, but not the
+jump table, which stays as FNDISK left it; the driver puts 0006H back at the
+next SELDSK, which the CCP makes before it runs a program. The driver is
+below the CCP, so a warm boot doesn't overwrite it.
 
 LIST and LISTST go to the BIOS unless the IOBYTE has LST: on UL1:. LIST
 keeps characters in a 64-byte buffer and sends them to the FujiNet's
@@ -321,12 +327,14 @@ with FujiNet in-process:
 
 ```
 tests/make-62k-boot.sh cpm62.h8d
-tests/fndisk-e2e.sh --boot cpm62.h8d --config FNCONFIG.COM
+tests/fndisk-e2e.sh --config FNCONFIG.COM --boot cpm62.h8d
 ```
 
-The second first runs FNDISK where there's no room, and checks what it
-says: on the rig's 64K system, and on the 62K one with the BIOS's RAM end
-poked (the BIOS has to be at E600H, as `make-62k-boot.sh` makes it). Then
+The second first runs FNDISK on the rig's 64K system, on the 62K one, and
+on the 64K one with something lowering 0006H, and checks where it
+installed, that 0006H points at it, and that a warm boot and a second run
+(which says where it is) keep it there. (`--boot` is optional; without it
+the 62K case is skipped.) Then
 it mounts an H17 image in slot 1 with FNCONFIG, loads FNDISK, reads
 and writes D:, warm boots, and checks on the host that the file written is
 in the image byte for byte. Then it prints two files on UL1: and one on
