@@ -4,10 +4,14 @@
 ; Copyright (C) 2026 Thomas Cherryhomes
 ; SPDX-License-Identifier: GPL-3.0-or-later
 ;
-; Lives at the top of memory, above the BIOS of a 62K (or smaller) Heath
-; CP/M 2.2.04. The loader points the BIOS jump table's disk entries here;
-; calls for the BIOS's own drives go straight on to it, calls for a FujiNet
-; drive are served over FujiBus.
+; Lives at the top of the TPA, just below the CCP of whatever Heath CP/M
+; 2.2.04 is running. The loader assembles it at 0 and relocates it (a page
+; offset added to each byte tools/mkreloc.py found changing between the
+; builds at 0 and 100H), then lowers the BDOS address at 0006H to it so
+; programs stop short of it. The loader points the BIOS jump table's disk
+; entries here; calls for the BIOS's own drives go straight on to it, calls
+; for a FujiNet drive are served over FujiBus. Everything from res_bss on is
+; zeroed by the loader, not part of its image.
 ;
 ; The images are H17 disks (.h8d): 40 tracks of ten 256-byte sectors, laid
 ; out as Heath's CP/M lays out a hard-sectored disk, and the FujiNet serves
@@ -21,18 +25,21 @@
 
 TICKS           equ     0x000B  ; the Heath BIOS's 2 ms tick counter
 
-        public  res_start, res_end
-        public  first_drive
-        public  hooks, bios_jumps, bios_seldsk, NHOOKS, do_seldsk
+        public  bdos_entry, sig, version, first_drive
+        public  hooks, bios_jumps, NHOOKS, do_seldsk
         public  list_hook, bios_list, wboot_hook, bios_wboot
         public  dph_table, DPH_SIZE, DPH_DIRBUF
-        public  fuji_call, req_dev, req_cmd, req_desc, req_aux, req_auxn
-        public  req_data, req_dlen, rep_dlen, buf
+        public  res_bss, res_end
 
 
-res_start:
+; Where 0006H points while we're in: on to the BDOS that was there (the
+; loader fills in its address)
+bdos_entry:
+        jp      0
+sig:
         defm    "FNDISK"
-        defb    2               ; version
+version:
+        defb    3
 
 first_drive:
         defb    3               ; CP/M drive number of slot 1 (the loader sets it)
@@ -89,8 +96,28 @@ do_setdma:
         ld      (dma),bc
         jp      bios_setdma
 
+; A warm boot reloads the BDOS and puts its entry back in 0006H, but the CCP
+; selects a drive before it runs a program: when 0006H is the BDOS's own
+; (Heath's: the BIOS less 0DFAH), put us in front of it again. Whatever was
+; between us and the BDOS before is gone with the warm boot.
+fix_bdos:
+        ld      hl,(1)          ; the BIOS's WBOOT entry
+        ld      de,-(3 + 0xDFA)
+        add     hl,de
+        ld      de,(6)
+        or      a
+        sbc     hl,de
+        ret     nz
+        ld      (bdos_entry + 1),de
+        ld      hl,bdos_entry
+        ld      (6),hl
+        ret
+
 ; C = drive, E bit 0 = 0 on the first select since a disk reset
 do_seldsk:
+        push    de
+        call    fix_bdos
+        pop     de
         ld      a,c
         ld      (sel_drive),a
         ld      a,(first_drive)
@@ -385,6 +412,7 @@ prn_count:      defb    0
         include "fujibus-vars.inc"
 caller_sp:      defw    0
 
+res_bss:
 alv:            defs    NDRIVES * 12
 csv:            defs    NDRIVES * 16
 PRN_SIZE        equ     64
