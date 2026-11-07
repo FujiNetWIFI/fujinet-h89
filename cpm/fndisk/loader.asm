@@ -9,12 +9,17 @@
 ;                   system)
 ;   FNDISK x        slot 1 on drive x:, the rest after it
 ;
-; Copies the resident part to the top of the TPA, just below the CCP (or
-; below whatever already lowered the BDOS address at 0006H), relocated to
-; the page it lands on, and lowers 0006H to it so programs stop short of it.
+; Copies the resident part, relocated to where it lands, to one of two places:
+;   above the BIOS, at the very top of memory, when the BIOS's RAM ends below
+;   that (a system made smaller with MOVCPM, such as 62K): the TPA keeps its
+;   size; or
+;   the top of the TPA, just below the CCP (or below whatever already lowered
+;   the BDOS address at 0006H), on any other system, in whole pages, with
+;   0006H lowered to it so programs stop short of it: about 4K off what they
+;   had (2K of it the CCP they could have overwritten).
 ; Points the BIOS jump table's disk entries at it, and its LIST, LISTST and
 ; WBOOT, then sets LST: to UL1: and warm boots so CP/M starts with the new
-; drives. It takes whole pages: about 2.5K off the TPA, on whatever BIOS.
+; drives.
 ;-----------------------------------------------------------------------------
 
         include "h89.inc"
@@ -22,7 +27,7 @@
 TICKS           equ     0x000B  ; the Heath BIOS's 2 ms tick counter
         include "resident.def"  ; offsets into the resident part
 
-VERSION         equ     3
+VERSION         equ     4
 CCP_TO_BIOS     equ     0x1600  ; the CCP (800H) and BDOS (0E00H) below the BIOS
 
 BDOS            equ     5
@@ -32,6 +37,7 @@ B_PRINT         equ     9
 BIOS_WBOOT      equ     0x03    ; Heath's BIOS: its jump table entries...
 BIOS_LIST       equ     0x0F
 BIOS_VERSION    equ     0x33    ; ...version byte, 04
+BIOS_RAM_END    equ     0x4B    ; ...first byte above its RAM
 BIOS_HOME       equ     0x18    ; HOME..LISTST: 8 entries
 BIOS_SELDSK     equ     0x1B
 BIOS_DPH0       equ     0x52    ; its first drive's DPH
@@ -67,14 +73,11 @@ start:
         ld      (seldsk_target),de
 
         ; Already in? Then the BIOS's SELDSK entry jumps to our do_seldsk, in
-        ; a copy that starts on a page.
+        ; a copy with the signature where this one's is.
         ex      de,hl
         ld      de,do_seldsk
         or      a
         sbc     hl,de           ; where that copy would start
-        ld      a,l
-        or      a
-        jr      nz,not_in
         ld      (installed),hl
         ld      de,sig
         add     hl,de
@@ -97,6 +100,29 @@ not_in:
         call    same_sig
         jp      z,another
 fresh:
+        ; Above the BIOS if it left room: its RAM ends (an end that isn't
+        ; above the BIOS is the top of memory) below the start of a copy that
+        ; ends at the top of memory
+        ld      hl,(bios)
+        ld      de,BIOS_RAM_END
+        add     hl,de
+        ld      e,(hl)
+        inc     hl
+        ld      d,(hl)
+        ld      hl,(bios)
+        or      a
+        sbc     hl,de
+        jr      nc,below_ccp
+        ld      hl,-res_end     ; 10000H - res_end
+        or      a
+        sbc     hl,de
+        jr      c,below_ccp
+        ld      hl,-res_end
+        ld      (base),hl
+        xor     a
+        ld      (lowers),a
+        jr      placed
+below_ccp:
         ; The top of the TPA: below the CCP, or where 0006H points if that is
         ; lower (something else is in above us)
         ld      hl,(bios)
@@ -122,7 +148,9 @@ top_found:
         pop     hl
         jp      c,no_memory
         ld      (base),hl
-
+        ld      a,1
+        ld      (lowers),a
+placed:
         call    card_on
         call    card_present
         jp      nz,no_card
@@ -169,6 +197,8 @@ set_dirbuf:
         jp      c,no_letters
         ld      (drive0),a
         ld      (image + first_drive),a
+        ld      a,(lowers)
+        ld      (image + lowered),a
 
         call    relocate
 
@@ -203,14 +233,15 @@ set_dirbuf:
         ld      hl,image + wboot_hook
         call    hook_entry
 
-        ld      hl,(base)       ; programs stop short of it
-        ld      (6),hl
-
         ld      a,(3)           ; LST: = UL1:, the FujiNet's printer
         or      0xC0
         ld      (3),a
 
-        ld      hl,(base)
+        ld      a,(lowers)
+        or      a
+        jr      z,say_above
+        ld      hl,(base)       ; programs stop short of it
+        ld      (6),hl
         ld      de,msg_base
         call    hex_word
         ld      hl,(base)
@@ -218,17 +249,23 @@ set_dirbuf:
         ld      de,msg_tpa
         call    hex_word
         ld      de,msg_installed
+        jr      say_where
+say_above:
+        ld      hl,(base)
+        ld      de,msg_base2
+        call    hex_word
+        ld      de,msg_above
+say_where:
         call    print
         call    list_drives
         ld      de,msg_printer
         call    print
         jp      0
 
-; Add the page it is loading at to each byte of the image that is the high
-; byte of an address: resident.bits has a bit for each byte of the image
+; Add the address it is loading at to each word of the image that is an
+; address: resident.bits has a bit for each byte of the image, set at the
+; high byte of one
 relocate:
-        ld      a,(base + 1)
-        ld      (page),a
         ld      hl,image
         ld      de,image_bits
         ld      b,(image_bits_end - image_bits) & 0xFF
@@ -240,8 +277,13 @@ reloc_bit:
         rrca
         jr      nc,reloc_next
         push    af
-        ld      a,(page)
+        dec     hl
+        ld      a,(base)
         add     a,(hl)
+        ld      (hl),a
+        inc     hl
+        ld      a,(base + 1)
+        adc     a,(hl)
         ld      (hl),a
         pop     af
 reloc_next:
@@ -508,11 +550,13 @@ msg_banner:     defm    "FNDISK: FujiNet drives for H89 CP/M", 13, 10, "$"
 msg_installed:  defm    "Installed at "
 msg_base:       defm    "xxxxH; the TPA ends at "
 msg_tpa:        defm    "xxxxH.", 13, 10, "$"
+msg_above:      defm    "Installed at "
+msg_base2:      defm    "xxxxH, above the BIOS; the TPA is unchanged.", 13, 10, "$"
 msg_already:    defm    "Already installed at "
 msg_where:      defm    "xxxxH.", 13, 10, "$"
 msg_another:    defm    "Another FNDISK is installed. Boot again, then run this one.", 13, 10, "$"
 msg_not_heath:  defm    "Needs Heath/Zenith CP/M 2.2.04.", 13, 10, "$"
-msg_no_memory:  defm    "Not enough memory below the CCP.", 13, 10, "$"
+msg_no_memory:  defm    "Not enough memory below the CCP, or above the BIOS.", 13, 10, "$"
 msg_no_letters: defm    "No 8 free drive letters there.", 13, 10, "$"
 msg_no_fujinet: defm    "The FujiNet isn't answering.", 13, 10, "$"
 msg_no_card:    defm    "No FujiNet card (82C55 at 0D0H) found.", 13, 10, "$"
@@ -533,7 +577,7 @@ installed:      defw    0       ; where our copy is, if it is
 base:           defw    0       ; where this one is going
 drive0:         defb    0       ; CP/M drive number of slot 1
 free_drive:     defb    0
-page:           defb    0
+lowers:         defb    0       ; 0006H is to be lowered to it
 
                 include "fujibus-vars.inc"
 

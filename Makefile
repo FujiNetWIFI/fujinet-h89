@@ -31,8 +31,9 @@ all: $(BUILD)/FNDISK.COM $(BUILD)/NPIP.COM $(BUILD)/fndisk-cpm.h8d $(BUILD)/FN.D
      $(BUILD)/stage2.bin
 
 # The resident part of FNDISK is assembled at 0 and at 100H; mkreloc.py finds
-# the address bytes from the difference, and the loader fixes them up for
-# wherever below the CCP it lands.
+# the address bytes from the difference (and checks them against a build at
+# 1234H), and the loader fixes them up for wherever it lands: above the BIOS
+# or below the CCP.
 $(BUILD)/fndisk0/resident.bin: $(FNDISK_SRC)/resident.asm $(COMMON)
 	@mkdir -p $(BUILD)/fndisk0
 	$(Z80ASM) -b -g -m -I=$(FNDISK_SRC) -I=common -O=$(BUILD)/fndisk0 -r=0x0000 -o=$@ $<
@@ -41,10 +42,14 @@ $(BUILD)/fndisk1/resident.bin: $(FNDISK_SRC)/resident.asm $(COMMON)
 	@mkdir -p $(BUILD)/fndisk1
 	$(Z80ASM) -b -g -m -I=$(FNDISK_SRC) -I=common -O=$(BUILD)/fndisk1 -r=0x0100 -o=$@ $<
 
-$(BUILD)/fndisk/resident.bin: $(BUILD)/fndisk0/resident.bin $(BUILD)/fndisk1/resident.bin tools/mkreloc.py
+$(BUILD)/fndisk2/resident.bin: $(FNDISK_SRC)/resident.asm $(COMMON)
+	@mkdir -p $(BUILD)/fndisk2
+	$(Z80ASM) -b -g -m -I=$(FNDISK_SRC) -I=common -O=$(BUILD)/fndisk2 -r=0x1234 -o=$@ $<
+
+$(BUILD)/fndisk/resident.bin: $(BUILD)/fndisk0/resident.bin $(BUILD)/fndisk1/resident.bin $(BUILD)/fndisk2/resident.bin tools/mkreloc.py
 	@mkdir -p $(BUILD)/fndisk
-	python3 -I tools/mkreloc.py --def $(BUILD)/fndisk0/resident.def \
-	  $(BUILD)/fndisk0/resident.bin $(BUILD)/fndisk1/resident.bin \
+	python3 -I tools/mkreloc.py --def $(BUILD)/fndisk0/resident.def --org2 0x1234 \
+	  $(BUILD)/fndisk0/resident.bin $(BUILD)/fndisk1/resident.bin $(BUILD)/fndisk2/resident.bin \
 	  -o $@ --bits $(BUILD)/fndisk/resident.bits
 	cp $(BUILD)/fndisk0/resident.def $(BUILD)/fndisk/resident.def
 

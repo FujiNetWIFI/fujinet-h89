@@ -4,8 +4,8 @@
 # slot 1 with FNCONFIG, load FNDISK, then read, write and warm boot on D:, and
 # check on the host that the file written is in the image. Then print on
 # UL1: (the FujiNet's printer) and on CRT:, and check what the printer got.
-# First, check where FNDISK puts itself on a 64K system, a 62K one and one
-# with something already below the CCP.
+# First, check where FNDISK puts itself on a 64K system (below the CCP), a 62K
+# one (above the BIOS) and one with something already below the CCP.
 #
 #   tests/fndisk-e2e.sh --config FNCONFIG.COM [--boot CPM62.h8d] [--rig DIR] [--keep DIR]
 #
@@ -63,7 +63,7 @@ fixup "${WORK}/tools/disk"
 # Where it goes: just below the CCP (BIOS - 1600H), or below where 0006H
 # points if that is lower, in whole pages, and 0006H follows it: after
 # installing, and after a warm boot and a second run (which says where it is).
-# The resident part and its buffers are 8D7H bytes (make prints it).
+# The resident part and its buffers are res_end bytes (make prints it).
 #   $1 = name, $2 = boot disk, $3 = poke to 0007H or "", $4 = base's high byte
 install_at() {
     local log="${WORK}/$1.log" poke=() hi="$4" top="${4:0:2}"
@@ -95,8 +95,35 @@ install_at() {
 install_at 64k "${BOOT64}" "" CF
 # something already lowered the BDOS address to C0xxH: below that, B700H
 install_at below-an-rsx "${BOOT64}" c0 B7
-# the 62K system: BIOS E600H, CCP D000H, so C700H
-[[ -z "${BOOT}" ]] || install_at 62k "${BOOT}" "" C7
+
+# A 62K system's BIOS RAM ends at F712H: the resident part goes above it, to
+# the top of memory (its res_end bytes), and 0006H stays the BDOS's own (BIOS
+# E600H less 0DFAH), through the warm boot and a second run.
+install_above() {
+    local log="${WORK}/$1.log" res_end base
+    res_end=$((0x$(sed -n 's/^DEFC res_end *= \$\([0-9A-Fa-f]*\)/\1/p' "${ROOT}/build/fndisk/resident.def")))
+    base=$(printf '%04X' $((0x10000 - res_end)))
+    cp "$2" "${WORK}/$1.h8d"
+    "${RUN}" --roms "${RIG}/tools/roms" --home "${WORK}/$1" --timeout 90 \
+        --disk "h17:1=${WORK}/$1.h8d" --disk "h17:2=${WORK}/tools/disk" \
+        --until 'H:' --type 'B\r' --until 'A>' --wait 1000 --debug 'radix hex' \
+        --type 'B:FNDISK\r' --until 'Installed at' --prompt 'A>' --wait 500 --screen \
+        --debug 'mem 6 2' \
+        --type '\x03' --wait 1500 \
+        --type 'B:FNDISK\r' --until 'Already installed at' --prompt 'A>' --wait 500 --screen \
+        --debug 'mem 6 2' \
+        > "${log}" 2>&1 || { grep -E 'timed out|failed' "${log}" >&2 || true
+            echo "FAIL: install above ($1): the run stopped" >&2; exit 1; }
+    grep -q "Installed at ${base}H, above the BIOS; the TPA is unchanged\." "${log}" \
+        && grep -q "Already installed at ${base}H\." "${log}" \
+        || { grep -E 'nstalled|Not enough' "${log}" >&2; echo "FAIL: install above ($1): want ${base}H" >&2; exit 1; }
+    # 0006H holds 06 D8
+    [[ $(grep -cE "^(\[fujinet\] )?0006 +06 D8" "${log}") -ge 2 ]] \
+        || { grep -E '^(\[fujinet\] )?0006' "${log}" >&2
+             echo "FAIL: install above ($1): 0006H isn't D806H after install and warm boot" >&2; exit 1; }
+    echo "PASS: install above ($1): ${base}H, 0006H still D806H, through the warm boot"
+}
+[[ -z "${BOOT}" ]] || install_above 62k "${BOOT}"
 
 # The FujiNet's SD card: an H17 CP/M disk with text files on it. PRINT.TXT
 # has a line longer than FNDISK's print buffer, and a last one with no end,
