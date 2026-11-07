@@ -4,10 +4,12 @@
 ; Copyright (C) 2026 Thomas Cherryhomes
 ; SPDX-License-Identifier: GPL-3.0-or-later
 ;
-; Lives at the top of the TPA, just below the CCP of whatever Heath CP/M
-; 2.2.04 is running. The loader assembles it at 0 and relocates it (a page
-; offset added to each byte tools/mkreloc.py found changing between the
-; builds at 0 and 100H), then lowers the BDOS address at 0006H to it so
+; Lives either above the BIOS, at the top of memory, when the system was made
+; smaller than the RAM it has (MOVCPM) and the BIOS's RAM ends below it, or
+; at the top of the TPA, just below the CCP of whatever Heath CP/M 2.2.04 is
+; running. The loader assembles it at 0 and relocates it (the load address
+; added to each address word tools/mkreloc.py found moving with the build's
+; origin). Below the CCP it also lowers the BDOS address at 0006H to it so
 ; programs stop short of it. The loader points the BIOS jump table's disk
 ; entries here; calls for the BIOS's own drives go straight on to it, calls
 ; for a FujiNet drive are served over FujiBus. Everything from res_bss on is
@@ -25,7 +27,7 @@
 
 TICKS           equ     0x000B  ; the Heath BIOS's 2 ms tick counter
 
-        public  bdos_entry, sig, version, first_drive
+        public  bdos_entry, sig, version, first_drive, lowered
         public  hooks, bios_jumps, NHOOKS, do_seldsk
         public  list_hook, bios_list, wboot_hook, bios_wboot
         public  dph_table, DPH_SIZE, DPH_DIRBUF
@@ -39,10 +41,12 @@ bdos_entry:
 sig:
         defm    "FNDISK"
 version:
-        defb    3
+        defb    4
 
 first_drive:
         defb    3               ; CP/M drive number of slot 1 (the loader sets it)
+lowered:
+        defb    0               ; 0006H was lowered to us (the loader sets it)
 
 ; The loader copies these over the BIOS's HOME..LISTST entries
 hooks:
@@ -99,8 +103,12 @@ do_setdma:
 ; A warm boot reloads the BDOS and puts its entry back in 0006H, but the CCP
 ; selects a drive before it runs a program: when 0006H is the BDOS's own
 ; (Heath's: the BIOS less 0DFAH), put us in front of it again. Whatever was
-; between us and the BDOS before is gone with the warm boot.
+; between us and the BDOS before is gone with the warm boot. Above the BIOS
+; 0006H was never lowered, so it stays the BDOS's.
 fix_bdos:
+        ld      a,(lowered)
+        or      a
+        ret     z
         ld      hl,(1)          ; the BIOS's WBOOT entry
         ld      de,-(3 + 0xDFA)
         add     hl,de
