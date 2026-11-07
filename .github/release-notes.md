@@ -2,11 +2,11 @@ FujiNet for the Heathkit H89 and the H89-ESP32 FujiNet card. The
 [README](https://github.com/FujiNetWIFI/fujinet-h89#readme) says how to use
 each file.
 
-This release is for the card without its 74LVC245 (needs
+Like v1.0.5, this release is for the card without its 74LVC245 (needs
 FujiNetWIFI/fujinet-firmware#2232). Cards that still have the 245 should stay
 on v1.0.4.
 
-`FNDISK.COM` no longer needs a 62K system: it installs at the top of the TPA,
+New in v1.0.6: `FNDISK.COM` no longer needs a 62K system: it installs at the top of the TPA,
 below the CCP, on the system as it boots (64K, or a BIOS with CF, RTC or LPT
 drivers), and lowers the BDOS address to itself. It takes about 2.5K of the
 TPA.
