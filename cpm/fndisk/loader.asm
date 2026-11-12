@@ -154,6 +154,7 @@ placed:
         call    card_on
         call    card_present
         jp      nz,no_card
+        call    mount_all
 
         ; Fill in the image where it is: the BIOS's own HOME..LISTST, LIST
         ; and WBOOT entries, for the driver to pass calls on...
@@ -320,6 +321,10 @@ already:
         call    hex_word
         ld      de,msg_already
         call    print
+        call    card_on
+        call    card_present
+        jp      nz,no_card
+        call    mount_all       ; again, if the FujiNet restarted since
         call    list_drives
         jp      0
 
@@ -457,6 +462,28 @@ copy_entry:
         include "fujibus.inc"
 
 ;-----------------------------------------------------------------------------
+; Have the FujiNet mount the images in its slots: after it starts it knows
+; them but has mounted none, and only a mounted slot logs in. A slot that
+; won't mount is reported, and the rest still work.
+;-----------------------------------------------------------------------------
+
+mount_all:
+        ld      a,DEV_FUJI
+        ld      (req_dev),a
+        ld      a,CMD_MOUNT_ALL
+        ld      (req_cmd),a
+        xor     a
+        ld      (req_desc),a
+        ld      (req_auxn),a
+        ld      hl,0
+        ld      (req_dlen),hl
+        ld      (rep_dlen),hl
+        call    fuji_call
+        ret     z
+        ld      de,msg_no_mount
+        jp      print
+
+;-----------------------------------------------------------------------------
 ; Which image is in each drive now
 ;-----------------------------------------------------------------------------
 
@@ -558,6 +585,7 @@ msg_another:    defm    "Another FNDISK is installed. Boot again, then run this 
 msg_not_heath:  defm    "Needs Heath/Zenith CP/M 2.2.04.", 13, 10, "$"
 msg_no_memory:  defm    "Not enough memory below the CCP, or above the BIOS.", 13, 10, "$"
 msg_no_letters: defm    "No 8 free drive letters there.", 13, 10, "$"
+msg_no_mount:   defm    "Not every slot would mount (FNCONFIG shows why).", 13, 10, "$"
 msg_no_fujinet: defm    "The FujiNet isn't answering.", 13, 10, "$"
 msg_no_card:    defm    "No FujiNet card (82C55 at 0D0H) found.", 13, 10, "$"
 msg_printer:    defm    "LST: is UL1:, the FujiNet's printer (STAT LST:=LPT: for the BIOS's).", 13, 10, "$"

@@ -29,6 +29,7 @@ CMD_DELETE      equ     0x21    ; '!': as OPEN
 CMD_LOCK        equ     0x23    ; '#': as OPEN
 CMD_DEVICE_SLOTS equ    0xF2    ; 8 x {hostSlot, mode, name[36]}
 CMD_DEVICE_PATH equ     0xDA    ; a slot's full path, 256 bytes
+CMD_MOUNT_ALL   equ     0xD7    ; mount every slot's image
 REPLY_ACK       equ     0x06
 REPLY_NAK       equ     0x15
 FIELDS_U8       equ     1
