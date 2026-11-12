@@ -217,3 +217,18 @@ if not any(a.endswith('PIP LST:=D:HELLO.TXT') and b.startswith('Hello from')
 print('PASS: printed on UL1: byte for byte (%d bytes, ending in a line with no end), and on CRT:'
       % len(paper))
 EOF
+
+# A fresh FujiNet (same home, so its slot 1 still holds TEST.H8D) has mounted
+# nothing: FNDISK alone, with no FNCONFIG first, must mount the slots itself
+cp "${BOOT64}" "${WORK}/boot2.h8d"
+"${RUN}" --roms "${RIG}/tools/roms" --home "${WORK}/home" --timeout 90 \
+    --disk "h17:1=${WORK}/boot2.h8d" --disk "h17:2=${WORK}/tools/disk" \
+    --until 'H:' --type 'B\r' --until 'A>' --wait 1000 \
+    --type 'B:FNDISK\r' --until 'Installed at' --until 'LST: is UL1:' --prompt 'A>' --wait 500 --screen \
+    --type 'DIR D:\r' --until 'HELLO' --prompt 'A>' --wait 500 --screen \
+    > "${WORK}/mount.log" 2>&1 || { grep -E 'timed out|failed' "${WORK}/mount.log" >&2 || true
+        sed -n '/---- screen ----/,/^\(\[fujinet\] \)\?----------------/p' "${WORK}/mount.log" | sed 's/^\[fujinet\] //' | tail -20 >&2
+        echo "FAIL: FNDISK alone didn't mount the slots" >&2; exit 1; }
+grep -q 'D: slot 1  TEST.H8D' "${WORK}/mount.log" \
+    || { echo "FAIL: slot 1 isn't TEST.H8D after FNDISK alone" >&2; exit 1; }
+echo "PASS: FNDISK mounts the slots itself (no FNCONFIG first)"

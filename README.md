@@ -56,8 +56,9 @@ A>PIP LST:=D:README.TXT
     ```
 - `FNDISK x` puts slot 1 on drive x: instead (not one of the BIOS's own).
   Running it again lists the drives.
-- Mount images with FNCONFIG; it returns to CP/M with a warm boot, which
-  logs the drives in afresh.
+- FNDISK has the FujiNet mount the images in its slots, so the drives work
+  without running FNCONFIG first. Use FNCONFIG to change the images; it
+  returns to CP/M with a warm boot, which logs the drives in afresh.
 - **Printing:** installing sets LST: to UL1:, the FujiNet's printer
   ([where it goes](#where-printing-goes)), so `PIP LST:=`, ^P and
   programs' printing go there. `STAT LST:=LPT:` gives LST: back to the
