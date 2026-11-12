@@ -468,20 +468,12 @@ copy_entry:
 ;-----------------------------------------------------------------------------
 
 mount_all:
-        ld      a,DEV_FUJI
-        ld      (req_dev),a
-        ld      a,CMD_MOUNT_ALL
-        ld      (req_cmd),a
-        xor     a
-        ld      (req_desc),a
-        ld      (req_auxn),a
-        ld      hl,0
-        ld      (req_dlen),hl
-        ld      (rep_dlen),hl
-        call    fuji_call
+        call    mount_call
         ret     z
         ld      de,msg_no_mount
         jp      print
+
+        include "mountall.inc"
 
 ;-----------------------------------------------------------------------------
 ; Which image is in each drive now

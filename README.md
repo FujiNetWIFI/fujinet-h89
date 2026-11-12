@@ -113,7 +113,8 @@ LABEL: FUJINET TEST DISK
 - **Images** are H17 disks (`.h8d`) formatted by HDOS. A slot is a unit only
   while the FujiNet has an `.h8d` mounted in it: MOUNT says *Unit Not
   Available* for an empty slot and *Unable to Read this Disk* for anything
-  else. An image mounted read only is write locked.
+  else. An image mounted read only is write locked. MOUNT has the FujiNet
+  mount the images in its slots first, so FNCONFIG isn't needed to start.
 - HDOS loads the driver on first use and keeps it until the next boot: it
   takes about 4.3K (the driver, and a 256-byte GRT for each unit).
   `LOAD FN:` loads it at once.
