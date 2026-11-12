@@ -6,10 +6,10 @@ Like v1.0.5, this release is for the card without its 74LVC245 (needs
 FujiNetWIFI/fujinet-firmware#2232). Cards that still have the 245 should stay
 on v1.0.4.
 
-New in v1.0.8: `FNDISK.COM` has the FujiNet mount its slots' images when it
-installs, so the drives work without running `FNCONFIG` first (after a power-up
-they showed as empty until FNCONFIG mounted them). Running FNDISK again
-mounts them again.
+New in v1.0.8: the drives work without running `FNCONFIG` first. After a
+power-up the FujiNet knows its slots' images but has mounted none, so the drives
+showed as empty. `FNDISK.COM` now has the FujiNet mount them when it installs
+(and when run again), and `MOUNT FNn:` does the same under HDOS (`FN.DVD`).
 
 New in v1.0.7: `FNDISK.COM` installs above the BIOS, at the top of memory,
 when the system leaves room there (a 62K system made with `MOVCPM17 62 *`): the

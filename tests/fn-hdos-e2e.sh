@@ -185,3 +185,14 @@ grep -qi 'write failure' <<< "${AFTER}" || fail "COPY LP: with the printer off d
 sed -n '/>CAT FN0:/,$p' <<< "${AFTER}" | grep -q '^HELLO' || fail "FN0: didn't work after LP: gave up"
 [[ ! -s "${WORK}/b/data/fujinet/SD/paper" ]] || fail "the printer got something while it was off"
 echo "PASS: printing with the printer off fails, and FN0: works after"
+
+# --- Session C: a fresh FujiNet (session A's home: slot 1 still holds
+# TEST.H8D) has mounted nothing, and MOUNT alone, with no FNCONFIG first, must
+# find the disk
+mapfile -t BOOT_C < <(boot)
+"${RUN}" --roms "${RIG}/tools/roms" --home "${WORK}/a" --timeout 90 "${BOOT_C[@]}" \
+    --type 'LOAD FN:\r' --wait 3000 --prompt '>' \
+    --type 'MOUNT FN0:\r' --until 'MOUNTED ON FN0:' --prompt '>' \
+    --type 'CAT FN0:\r' --until 'HELLO' --prompt '>' --wait 500 --screen \
+    > "${WORK}/c.log" 2>&1 || { grep -E 'timed out' "${WORK}/c.log" >&2 || true; screen "${WORK}/c.log" | tail -20 >&2; fail "MOUNT alone didn't find the disk (no FNCONFIG first)"; }
+echo "PASS: MOUNT mounts the FujiNet's slots itself (no FNCONFIG first)"

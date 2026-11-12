@@ -209,6 +209,17 @@ do_mount:
         ld      (hl),0
         ld      a,0xFF
         ld      (cache_slot),a
+        ld      a,(card)
+        or      a
+        jr      nz,mu_mount
+        call    card_check
+        jr      z,ensure_unit   ; no card: ensure_unit says so
+mu_mount:
+        ld      a,1
+        ld      (poll_ok),a
+        call    mount_call      ; the FujiNet restarted? mount its slots; a
+        xor     a               ; failure shows as the slot's own error below
+        ld      (poll_ok),a
         ; fall into ensure_unit
 
 ; The slot logged in: an .h8d mounted in it, its size from its label.
@@ -494,6 +505,7 @@ fuji_poll:
         ret
 
         include "login.inc"
+        include "mountall.inc"
         include "sector.inc"
         include "fujibus.inc"
         include "card.inc"
