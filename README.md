@@ -3,7 +3,8 @@
 Software that runs on the H89 to use the H89-ESP32 FujiNet card (an 82C55
 at 0D0H): FNDISK for CP/M and FN.DVD for HDOS make the FujiNet's drive slots
 disks, FNDISK and LP.DVD print on the FujiNet's printer, NPIP copies files
-to and from the network on both, and FNBOOT starts
+to and from the network on both, NC (NetCat) makes the H19 a terminal for
+TELNET, SSH and other network URLs, and FNBOOT starts
 FNCONFIG from the monitor, with no disk. FNCONFIG, which
 picks the images for the FujiNet's drive slots, is in
 [fujinet-config](https://github.com/FujiNetWIFI/fujinet-config) (`make h89`).
@@ -248,6 +249,23 @@ size.
   looked for between blocks and while FujiBus waits; a reply given up on is
   drained at once, so a disk driver's next call starts clean.
 
+## NC: the H19 as a network terminal
+
+`NC.COM` (CP/M) and `NC.ABS` (HDOS) are NetCat, built from
+[netcat](https://github.com/FujiNetWIFI/netcat) (`make h89-cpm h89-hdos`).
+They're on `fujinet-cpm.h8d` and `fujinet-hdos.h8d`.
+
+```
+A>NC N:TELNET://BBS.FOZZTEXX.COM/
+>RUN SY1:NC.ABS
+```
+
+With no URL on the command line NC asks for one; type it there when the URL is
+case-sensitive, since both systems upper-case the command line. The H19 is the
+terminal: bytes from the host go straight to it, and TELNET and SSH are told
+`term=h19`. Press **BREAK** to hang up (CTRL-@ does too). A RETURN at the URL
+prompt quits.
+
 ## FNBOOT: FNCONFIG from the FujiNet's flash
 
 FNBOOT is about 100 bytes, started with the monitor's Go. It restarts the
@@ -320,11 +338,12 @@ Needs z88dk (`z88dk-z80asm`, `z88dk-appmake`) on PATH.
 make                    # build/FNDISK.COM, build/NPIP.COM, build/fndisk-cpm.h8d,
                         # build/FN.DVD, build/LP.DVD, build/NPIP.ABS,
                         # build/fn-hdos.h8d
-make tools-disk CONFIG=../fujinet-config/r2r/h89-cpm/config.com
-                        # build/fujinet-cpm.h8d: FNCONFIG.COM, FNDISK.COM, NPIP.COM
-make hdos-tools-disk CONFIG_ABS=../fujinet-config/r2r/h89-hdos/config.abs
+make tools-disk CONFIG=../fujinet-config/r2r/h89-cpm/config.com NC=../netcat/r2r/h89-cpm/nc.com
+                        # build/fujinet-cpm.h8d: FNCONFIG.COM, FNDISK.COM, NPIP.COM,
+                        # NC.COM (NC= is optional)
+make hdos-tools-disk CONFIG_ABS=../fujinet-config/r2r/h89-hdos/config.abs NC_ABS=../netcat/r2r/h89-hdos/nc.abs
                         # build/fujinet-hdos.h8d: FNCONFIG.ABS, FN.DVD, LP.DVD,
-                        # NPIP.ABS
+                        # NPIP.ABS, NC.ABS (NC_ABS= is optional)
 make autorun CONFIG_ABS=../fujinet-config/r2r/h89-hdos/config.abs
                         # build/autorun.img: FNBOOT's boot image
 make monitor-rom MTR=.../2732_444-142_mtr90.u518

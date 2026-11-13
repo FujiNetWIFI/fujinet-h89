@@ -18,6 +18,9 @@ env:
   # #155 and #249 merge
   FUJINET_LIB_H89: https://github.com/tschak909/fujinet-lib.git#h89-setup-after-reset
 
+  # NetCat (NC.COM, NC.ABS) with BREAK to hang up, on fujinet-lib 5.1.1
+  NETCAT_REF: 85388ba99c71eb1da21d8fd38da98a65f23f8ae4
+
 defaults:
   run:
     shell: bash
@@ -38,14 +41,23 @@ jobs:
           ref: ${{ env.CONFIG_REF }}
           path: fujinet-config
 
+      - uses: actions/checkout@v7
+        with:
+          repository: FujiNetWIFI/netcat
+          ref: ${{ env.NETCAT_REF }}
+          path: netcat
+
+      - name: Build NetCat
+        run: make -C netcat h89-cpm h89-hdos
+
       - name: Build FNCONFIG
         run: make -C fujinet-config FUJINET_LIB_H89="$FUJINET_LIB_H89" h89
 
       - name: Build
         run: |
           make
-          make tools-disk CONFIG=fujinet-config/r2r/h89-cpm/config.com
-          make hdos-tools-disk CONFIG_ABS=fujinet-config/r2r/h89-hdos/config.abs
+          make tools-disk CONFIG=fujinet-config/r2r/h89-cpm/config.com NC=netcat/r2r/h89-cpm/nc.com
+          make hdos-tools-disk CONFIG_ABS=fujinet-config/r2r/h89-hdos/config.abs NC_ABS=netcat/r2r/h89-hdos/nc.abs
           make autorun CONFIG_ABS=fujinet-config/r2r/h89-hdos/config.abs
 
       - name: Test the host tools
@@ -59,6 +71,8 @@ jobs:
           cp build/{fnboot.bin,stage2.bin,autorun.img} dist/
           cp fujinet-config/r2r/h89-cpm/config.com dist/FNCONFIG.COM
           cp fujinet-config/r2r/h89-hdos/config.abs dist/FNCONFIG.ABS
+          cp netcat/r2r/h89-cpm/nc.com dist/NC.COM
+          cp netcat/r2r/h89-hdos/nc.abs dist/NC.ABS
 
       - uses: actions/upload-artifact@v7
         with:
@@ -87,6 +101,7 @@ jobs:
           { cat .github/release-notes.md
             echo
             echo "FNCONFIG is FujiNetWIFI/fujinet-config@${CONFIG_REF}."
+            echo "NetCat is FujiNetWIFI/netcat@${NETCAT_REF}."
           } > notes.md
           gh release create "$GITHUB_REF_NAME" dist/* --title "$GITHUB_REF_NAME" \
             --notes-file notes.md --generate-notes
