@@ -108,15 +108,17 @@ $(BUILD)/fn-hdos.h8d: $(BUILD)/FN.DVD $(BUILD)/LP.DVD $(BUILD)/NPIP.ABS tools/hd
 	python3 -I tools/hdosfs.py ls $@.tmp --check >/dev/null
 	mv $@.tmp $@
 
-# FNCONFIG.COM, FNDISK.COM and NPIP.COM on one H17 CP/M disk:
-#   make tools-disk CONFIG=../fujinet-config/r2r/h89-cpm/config.com
+# FNCONFIG.COM, FNDISK.COM and NPIP.COM (and NetCat's NC.COM, when NC is set)
+# on one H17 CP/M disk:
+#   make tools-disk CONFIG=../fujinet-config/r2r/h89-cpm/config.com NC=../netcat/r2r/h89-cpm/nc.com
 tools-disk: $(BUILD)/FNDISK.COM $(BUILD)/NPIP.COM tools/cpm-dir-fixup.py
 	@test -n "$(CONFIG)" || { echo "set CONFIG=path/to/config.com" >&2; exit 1; }
 	rm -rf $(BUILD)/tools && mkdir -p $(BUILD)/tools
 	cp $(CONFIG) $(BUILD)/tools/FNCONFIG.COM
 	cp $(BUILD)/FNDISK.COM $(BUILD)/NPIP.COM $(BUILD)/tools/
+	$(if $(NC),cp $(NC) $(BUILD)/tools/NC.COM)
 	cd $(BUILD)/tools && $(APPMAKE) +cpmdisk -f hz89 --container raw --no-com-file \
-	  -b FNCONFIG.COM -a FNDISK.COM -a NPIP.COM -o disk
+	  -b FNCONFIG.COM -a FNDISK.COM -a NPIP.COM $(if $(NC),-a NC.COM) -o disk
 	python3 -I tools/cpm-dir-fixup.py $(BUILD)/tools/disk
 	mv $(BUILD)/tools/disk $(BUILD)/fujinet-cpm.h8d
 
@@ -159,8 +161,9 @@ monitor-rom: $(BUILD)/fnboot.bin tools/fnboot.py
 check: $(BUILD)/stage2.bin $(BUILD)/fnboot.bin
 	tests/host-tools.sh
 
-# FNCONFIG.ABS, FN.DVD, LP.DVD and NPIP.ABS on one HDOS disk:
-#   make hdos-tools-disk CONFIG_ABS=../fujinet-config/r2r/h89-hdos/config.abs
+# FNCONFIG.ABS, FN.DVD, LP.DVD and NPIP.ABS (and NetCat's NC.ABS, when NC_ABS
+# is set) on one HDOS disk:
+#   make hdos-tools-disk CONFIG_ABS=../fujinet-config/r2r/h89-hdos/config.abs NC_ABS=../netcat/r2r/h89-hdos/nc.abs
 hdos-tools-disk: $(BUILD)/FN.DVD $(BUILD)/LP.DVD $(BUILD)/NPIP.ABS tools/hdosfs.py
 	@test -n "$(CONFIG_ABS)" || { echo "set CONFIG_ABS=path/to/config.abs" >&2; exit 1; }
 	python3 -I tools/hdosfs.py blank $(BUILD)/fujinet-hdos.h8d.tmp --label "FujiNet for HDOS"
@@ -168,6 +171,7 @@ hdos-tools-disk: $(BUILD)/FN.DVD $(BUILD)/LP.DVD $(BUILD)/NPIP.ABS tools/hdosfs.
 	python3 -I tools/hdosfs.py put $(BUILD)/fujinet-hdos.h8d.tmp $(BUILD)/FN.DVD --name FN.DVD --flags C0
 	python3 -I tools/hdosfs.py put $(BUILD)/fujinet-hdos.h8d.tmp $(BUILD)/LP.DVD --name LP.DVD --flags C0
 	python3 -I tools/hdosfs.py put $(BUILD)/fujinet-hdos.h8d.tmp $(BUILD)/NPIP.ABS --name NPIP.ABS
+	$(if $(NC_ABS),python3 -I tools/hdosfs.py put $(BUILD)/fujinet-hdos.h8d.tmp $(NC_ABS) --name NC.ABS)
 	python3 -I tools/hdosfs.py ls $(BUILD)/fujinet-hdos.h8d.tmp --check
 	mv $(BUILD)/fujinet-hdos.h8d.tmp $(BUILD)/fujinet-hdos.h8d
 
