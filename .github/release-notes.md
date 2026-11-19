@@ -13,7 +13,7 @@ hangs up. Built on fujinet-lib 5.1.1.
 New in v1.0.8: the drives work without running `FNCONFIG` first. After a
 power-up the FujiNet knows its slots' images but has mounted none, so the drives
 showed as empty. `FNDISK.COM` now has the FujiNet mount them when it installs
-(and when run again), and `MOUNT FNn:` does the same under HDOS (`FN.DVD`).
+(and when run again), and `FN.DVD` does the same when it loads (and at `MOUNT FNn:`).
 
 New in v1.0.7: `FNDISK.COM` installs above the BIOS, at the top of memory,
 when the system leaves room there (a 62K system made with `MOVCPM17 62 *`): the

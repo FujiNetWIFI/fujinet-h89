@@ -149,7 +149,10 @@ first_call:
         ld      a,1
         ld      (inited),a
         call    card_on
-        ; fall into card_check
+        call    card_check
+        ret     z               ; no card: MOUNT says so
+        jp      mount_call      ; have the FujiNet mount its slots now; a
+                                ; failure shows as the slot's own error later
 
 ; Note whether the card is there. Z if it isn't.
 card_check:
