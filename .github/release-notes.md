@@ -6,6 +6,9 @@ Like v1.0.5, this release is for the card without its 74LVC245 (needs
 FujiNetWIFI/fujinet-firmware#2232). Cards that still have the 245 should stay
 on v1.0.4.
 
+New in v1.0.10: `FN.DVD` has the FujiNet mount its slots as soon as the driver
+loads, not only at `MOUNT FNn:`.
+
 New in v1.0.9: NetCat, a network terminal for the H19: `NC.COM` (CP/M) and
 `NC.ABS` (HDOS), on the FujiNet disks. `NC N:TELNET://host/` connects; BREAK
 hangs up. Built on fujinet-lib 5.1.1.
@@ -13,7 +16,7 @@ hangs up. Built on fujinet-lib 5.1.1.
 New in v1.0.8: the drives work without running `FNCONFIG` first. After a
 power-up the FujiNet knows its slots' images but has mounted none, so the drives
 showed as empty. `FNDISK.COM` now has the FujiNet mount them when it installs
-(and when run again), and `FN.DVD` does the same when it loads (and at `MOUNT FNn:`).
+(and when run again), and `MOUNT FNn:` does the same under HDOS (`FN.DVD`).
 
 New in v1.0.7: `FNDISK.COM` installs above the BIOS, at the top of memory,
 when the system leaves room there (a 62K system made with `MOVCPM17 62 *`): the
