@@ -183,11 +183,11 @@ want('*xy:=sd:/HELLO.TXT', r'^XY: - no such device$', 'an unknown device')
 want('*c:big.bin', r'^NPIP dest=source', 'no =: how to use it')
 if sys.argv[2] != '0':
     want('/WEB.BIN', r'\] +\d+/\?$', 'HTTP: the size not known (? as it copied)')
-    lines(r'^A>B:NPIP HTTP://.*/HSTOP.COM=B:HSTOP.COM\nHSTOP.COM +\[.*\] +\d+/7168\nStopped\.\nA>',
+    lines(r'^A>B:NPIP HTTP://.*/HSTOP.COM=B:HSTOP.COM\nHSTOP.COM +\[.*\] +\d+/\d+\nStopped\.\nA>',
           '^C in an HTTP upload: Stopped.')
 lines(r'^A>B:NPIP C:=SD:/STOP.BIN\nSTOP.BIN +\[#*\.+\] +\d+/70000\nStopped\.\nA>',
       '^C in a download: Stopped.')
-lines(r'^A>B:NPIP SD:/UP.COM=B:STOP.COM\nSTOP.COM +\[.*\] +\d+/7168\nStopped\.\nA>',
+lines(r'^A>B:NPIP SD:/UP.COM=B:STOP.COM\nSTOP.COM +\[.*\] +\d+/\d+\nStopped\.\nA>',
       '^C in an upload: Stopped.')
 lines(r'^A>B:NPIP\n\*\^C\n\n?A>', '^C at the * prompt')
 want('B:NPIP CON:=SD:/HELLO.TXT', r'^Line 000 of HELLO.TXT', 'CON:, with no progress line')

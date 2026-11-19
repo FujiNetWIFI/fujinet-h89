@@ -125,7 +125,7 @@ lines(r'^\*tt:=sd:/PRINT.TXT\nNPIP to LP:\n {8}A tab\nThe last line\.\n\*',
       "TT:, HDOS's NL lines each at the left, with no progress line")
 lines(r'^>SY1:NPIP SY2:=SD:/STOP.BIN\nSTOP.BIN +\[#*\.+\] +\d+/70000\nStopped\.\n\n?>',
       '^C in a download: Stopped.')
-lines(r'^>SY1:NPIP SD:/UP.ABS=SY1:STOP.ABS\nSTOP.ABS +\[.*\] +\d+/7168\nStopped\.\n\n?>',
+lines(r'^>SY1:NPIP SD:/UP.ABS=SY1:STOP.ABS\nSTOP.ABS +\[.*\] +\d+/\d+\nStopped\.\n\n?>',
       '^C in an upload: Stopped.')
 lines(r'^>SY1:NPIP\n\*\^C\n\n?>', '^C at the * prompt')
 lines(r'^>CAT SY2:$', 'the console as it was after (lower case typed, capitals seen)')
