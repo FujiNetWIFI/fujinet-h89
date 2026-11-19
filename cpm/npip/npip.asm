@@ -29,6 +29,8 @@ K_DEV           equ     2       ; LST: or PUN:
 BDOS            equ     5
 B_PUNCH         equ     4
 B_LIST          equ     5
+B_SEARCH1       equ     17
+B_SEARCHN       equ     18
 B_OPEN          equ     15
 B_CLOSE         equ     16
 B_DELETE        equ     19
@@ -99,6 +101,8 @@ os_usage:
         defm    "  B:=TNFS://HOST/DIR/FILE.TXT    to B:FILE.TXT", 13, 10
         defm    "  TNFS://HOST/DIR/=A:FILE.TXT    to HOST/DIR/FILE.TXT", 13, 10
         defm    "  LST:=SD:/README.TXT            to the list device (PUN:, CON:)", 13, 10
+        defm    "  B:=TNFS://HOST/DIR/*.TXT       every .TXT, to B:", 13, 10
+        defm    "  SD:/BAK/=B:*.COM               every .COM on B:, to SD:/BAK/", 13, 10
         defm    "The CCP makes a command line capitals; the * prompt doesn't.", 13, 10, 0
 
 ;-----------------------------------------------------------------------------
@@ -323,6 +327,15 @@ fp_part:
         ld      a,c
         cp      '!'
         ret     c               ; spaces, control characters
+        ld      a,(fp_pat)
+        or      a
+        ld      a,c
+        jr      z,fp_plain
+        cp      '*'
+        jr      z,fp_star
+        cp      '?'
+        jr      z,fp_store
+fp_plain:
         push    hl
         push    bc
         ld      hl,t_notname
@@ -332,15 +345,107 @@ fp_part:
         pop     hl
         scf
         ret     z
+fp_store:
         ld      (de),a
         inc     hl
         inc     de
         dec     b
         jr      fp_part
 
+; A pattern's *: ?s for the rest of the part, and the rest of it is skipped
+fp_star:
+        ld      a,'?'
+fp_fill:
+        ld      (de),a
+        inc     de
+        djnz    fp_fill
+fp_skip:
+        inc     hl
+        ld      a,(hl)
+        or      a
+        ret     z
+        cp      '.'
+        ret     z
+        jr      fp_skip
+
 t_notname:      defm    "<>,;:=?*[]|()/"
                 defb    0x5C            ; backslash
 t_notname_end:
+
+; HL -> a pattern, in capitals: every file it names, by BDOS's search (all of
+; the extents of one, so list_add keeps the first)
+os_wild:
+        ld      a,1
+        ld      (fp_pat),a
+        ld      de,src_fcb
+        call    fcb_parse
+        push    af
+        xor     a
+        ld      (fp_pat),a
+        pop     af
+        ld      a,E_BADNAME
+        ret     c
+        ld      a,'?'
+        ld      (src_fcb+12),a
+        ld      de,buf
+        ld      c,B_SETDMA
+        call    BDOS
+        ld      de,src_fcb
+        ld      c,B_SEARCH1
+        call    BDOS
+ow_hit:
+        cp      255
+        jr      nz,ow_name
+        xor     a
+        ret
+ow_name:
+        rrca                    ; the 32-byte entry in the 128 at buf
+        rrca
+        rrca
+        ld      e,a
+        ld      d,0
+        ld      hl,buf + 1
+        add     hl,de
+        ld      de,wname
+        ld      b,8
+ow_n:
+        ld      a,(hl)
+        and     0x7F
+        cp      ' '
+        jr      z,ow_nskip
+        ld      (de),a
+        inc     de
+ow_nskip:
+        inc     hl
+        djnz    ow_n
+        ld      a,'.'
+        ld      (de),a
+        inc     de
+        push    de
+        ld      b,3
+ow_e:
+        ld      a,(hl)
+        and     0x7F
+        cp      ' '
+        jr      z,ow_eskip
+        ld      (de),a
+        inc     de
+ow_eskip:
+        inc     hl
+        djnz    ow_e
+        pop     hl
+        or      a
+        sbc     hl,de
+        jr      nz,ow_end
+        dec     de              ; no extension: no dot
+ow_end:
+        xor     a
+        ld      (de),a
+        ld      hl,wname
+        call    list_add
+        ld      c,B_SEARCHN
+        call    BDOS
+        jr      ow_hit
 
 ; HL -> the file to read
 os_ropen:
@@ -590,6 +695,8 @@ os_errors:
         defb    0
         defm    "failed", 0
 
+fp_pat:         defb    0       ; fcb_parse takes a pattern: * and ?
+wname:          defs    13      ; NAME.EXT, from a directory entry
 dst_os_kind:    defb    0
 dev_fn:         defb    0       ; BDOS's LIST or PUNCH
 src_fcb:        defs    36

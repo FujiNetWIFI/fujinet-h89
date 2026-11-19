@@ -225,14 +225,30 @@ A>NPIP B:X.COM=SD:/X.COM
   starts.
 - **Errors** say which side and why: `sd:/NOSUCH.TXT - not found`. A BDOS
   error (Select, R/O, a bad sector) ends NPIP as it ends PIP.
-- One file at a time: no wildcards, and none of PIP's options.
+- **Wildcards:** a `*` (or `?`) in the source's name copies every file it
+  names, to a drive or disk, a directory URL, or (each in turn) a device:
+
+  ```
+  A>NPIP B:=TNFS://HOST/DIR/*.TXT
+  A>NPIP SD:/BAK/=B:A?.COM
+  >SY1:NPIP SD:/BAK/=SY1:*.ABS
+  ```
+
+  A local name takes `*` and `?`, as PIP's do (HDOS matches `NAME.EXT`
+  against DIRECT.SYS, and leaves its system files out). A URL takes only
+  `*`, and only in its last part: the FujiNet filters that directory's
+  listing, and `?` there is the query. HTTP has no directory to list. The
+  destination can't be a file name: `x:*.*` and `URL/*` mean the drive or the
+  directory itself. A directory in the listing is left out. The first copy
+  that fails stops the rest; "n files copied." ends a run of more than one.
+  Up to 8K of names; none of PIP's options.
 
 ### How it works
 
 `npip/` is the program; `cpm/npip/npip.asm` and `hdos/npip/npip.asm` are
 each system's part: the console, files and devices. The source is network
-unit N1 (71H), a network destination N2, and N3 asks a directory for a
-size.
+unit N1 (71H), a network destination N2, N3 asks a directory for a
+size, and N4 lists one for a `*`.
 
 - A network source is OPENed, then STATUS says how many bytes are waiting;
   READs ask for up to 512 of them at a time, and STATUS is asked again only
@@ -408,6 +424,8 @@ For NPIP:
 ```
 tests/npip-cpm-e2e.sh --boot cpm62.h8d [--tnfs-root DIR]
 tests/npip-hdos-e2e.sh --boot boot.h8d
+tests/npip-wild-cpm-e2e.sh --boot cpm62.h8d
+tests/npip-wild-hdos-e2e.sh --boot boot.h8d
 ```
 
 Each copies between a disk and the FujiNet's SD card (`SD:/` URLs) both
@@ -421,6 +439,10 @@ also copies over HTTP from a server it starts, and with `--tnfs-root DIR`,
 over TNFS: the `tnfsd` on this machine has to serve DIR on 16384 (a TNFS URL
 has no port). `--key ctrl-c` needs a fujinet-go-h89-desktop that has the
 ctrl- keys.
+
+The `npip-wild-*` ones copy by `*` and `?`, from the SD card and from the
+disk, to the SD card, the disk and the printer, and try the refusals and ^C
+in the middle of a batch.
 
 For FNBOOT:
 

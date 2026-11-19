@@ -8,11 +8,25 @@
 cmd_sp:         defw    0       ; SP in command, for fail
 card_ok:        defb    0       ; the card's been found
 poll_tick:      defb    0       ; the tick fuji_poll last looked in
+open_xl:        defb    0       ; net_open_raw: the OPEN's second field
 
-; A command's state, cleared as it starts (dst_kind's 0 is K_DISK)
-state:
-src_spec:       defw    0       ; the source as typed
+; A command's state, cleared as it starts
+cstate:
+src_spec:       defw    0       ; the source as typed (or sspec: one of many)
 dst_spec:       defw    0       ; the destination: as typed, or dspec
+src_base:       defw    0       ; many: the source as typed
+dst_base:       defw    0       ; many: the destination, a drive or directory
+w_url:          defb    0       ; many: the source is a URL
+w_dirlen:       defw    0       ; many: bytes of the source before its name
+w_next:         defw    0       ; many: the list's end, then the next to copy
+w_count:        defw    0       ; many: names in the list
+w_full:         defb    0       ; many: the list ran out of room
+list_state:     defb    0       ; 1: N4 open for the list
+ln_len:         defb    0       ; a line of the listing so far
+cstate_end:
+
+; A copy's state, cleared as it starts (dst_kind's 0 is K_DISK)
+state:
 src_name:       defw    0       ; the source's name: the last part of it
 src_url:        defb    0       ; 1: the source is a URL
 dst_url:        defb    0
@@ -43,6 +57,10 @@ tmp32:          defs    4
 tmp8:           defs    4
 bf_t:           defs    4
 bf_d:           defs    4
+wm_sp:          defw    0       ; wild_match: the pattern after its last *
+wm_ss:          defw    0       ; and the name where that * had got to
+hname:          defs    14      ; a name to match: NAME.EXT
+lname:          defs    LN_MAX + 2 ; a line of a listing
 cr_dot:         defw    0
 cr_end:         defw    0
 numbuf:         defs    11
@@ -51,8 +69,14 @@ numbuf:         defs    11
 
 line:           defs    256     ; the command line
 dspec:          defs    256     ; a destination with the source's name added
+sspec:          defs    256     ; one of many sources: its directory, then a name
 buf:            defs    SECTOR  ; FujiBus replies, and a local source's data
 obuf:           defs    CHUNK   ; a local file's data on its way
                 defs    256     ; the stack
 stack_top:
 npip_end:
+
+; The names of the files to copy, NUL after NUL and an empty one last. After
+; the program: nothing of it is in the file.
+wlist           equ     npip_end
+wlist_end       equ     npip_end + LIST_ROOM
