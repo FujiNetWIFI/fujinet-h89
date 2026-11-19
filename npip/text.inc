@@ -85,6 +85,11 @@ t_stopped:      defm    "Stopped.", 0
 t_nocard:       defm    "No FujiNet card at 0D0H.", 0
 t_wild:         defm    "no wildcards", 0
 t_urlstar:      defm    "a URL can't have * in it", 0
+t_wilddst:      defm    "many files go to a drive or a directory", 0
+t_wilddir:      defm    "a * can only be in the file name", 0
+t_toomany:      defm    "too many files", 0
+t_nomatch:      defm    "no files match", 0
+t_copied:       defm    " files copied.", 0
 t_baddev:       defm    "no such device", 0
 t_devsrc:       defm    "can't read from a device", 0
 t_nosrc:        defm    "name the file", 0

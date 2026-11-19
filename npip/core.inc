@@ -23,6 +23,9 @@
 ;   os_wclose   the copy is whole: close it. Carry: A = the system's error.
 ;   os_wabort   the copy is not: close it and take it away
 ;   os_errmsg   A = a system error: say what it is
+;   os_wild     HL -> a local spec with a * or ? in its name, in capitals:
+;               list_add each file it names, as NAME.EXT. Carry: A = the
+;               system's error.
 ;
 ; Copyright (C) 2026 Thomas Cherryhomes
 ; SPDX-License-Identifier: GPL-3.0-or-later
@@ -43,6 +46,10 @@ MODE_WRITE      equ     8
 ERR_EOF         equ     136     ; STATUS: the end of the data
 WAIT_TICKS      equ     15000   ; 30 s with nothing coming: give up
 LIST_MAX        equ     64      ; bytes of the directory's listing read
+UNIT_LIST       equ     DEV_NETWORK + 3 ; N4: a directory listed for a *
+LIST_ROOM       equ     8192    ; bytes for the names of the files a * names
+LN_MAX          equ     200     ; the longest name a listing can give
+DIR_RAW         equ     0x83    ; the listing as bare names, a line each
 
 ;-----------------------------------------------------------------------------
 ; HL -> the command line's arguments, NUL-terminated, in line. With some,
@@ -143,13 +150,9 @@ gl_done:
 command:
         ld      (cmd_sp),sp
         push    hl
-        ld      hl,state
-        ld      b,state_end - state
-        xor     a
-cmd_clear:
-        ld      (hl),a
-        inc     hl
-        djnz    cmd_clear
+        ld      hl,cstate
+        ld      b,state_end - cstate
+        call    clear_mem
         pop     hl
 
         ; dest=source
@@ -179,7 +182,149 @@ cmd_split:
         or      a
         jp      z,usage
 
+        ; A * or ? in the source: every file it names
+        call    is_url
+        or      a
+        jr      nz,cmd_urlw
+        ld      hl,(src_spec)
+        call    has_wild
+        or      a
+        jp      z,copy_one
+        jr      cmd_many
+cmd_urlw:
+        ld      hl,(src_spec)
+        call    url_wild
+        or      a
+        jp      z,copy_one
+        ld      (w_url),a
+        jr      cmd_many
+
+;-----------------------------------------------------------------------------
+; Many files: the source names them with a * (or ?). Make the list of them,
+; then copy each as if it had been typed.
+;-----------------------------------------------------------------------------
+
+cmd_many:
+        call    wild_dst
+        ld      hl,(src_spec)
+        ld      (src_base),hl
+        ld      hl,(dst_spec)
+        ld      (dst_base),hl
+        ld      hl,wlist
+        ld      (w_next),hl
+        ld      (hl),0
+        ld      a,(w_url)
+        or      a
+        jr      nz,cm_url
+        ld      hl,(src_spec)
+        call    local_upper
+        ld      hl,(src_spec)
+        call    os_kind
+        ld      hl,t_baddev
+        jp      c,fail_src_at
+        cp      K_DISK
+        ld      hl,t_devsrc
+        jp      nz,fail_src_at
+        ld      hl,(src_spec)
+        call    local_name
+        jr      cm_dirlen
+cm_url:
+        ld      hl,(src_spec)
+        call    url_split
+cm_dirlen:
+        ld      de,(src_spec)
+        or      a
+        sbc     hl,de
+        ld      (w_dirlen),hl
+        ld      a,(w_url)
+        or      a
+        jr      nz,cm_list
+        ld      hl,(src_spec)
+        call    os_wild
+        jp      c,fail_src_os
+        jr      cm_have
+cm_list:
+        call    need_card
+        call    url_list
+cm_have:
+        ld      a,(w_full)
+        or      a
+        ld      hl,t_toomany
+        jp      nz,fail_src_at
+        ld      hl,(w_count)
+        ld      a,h
+        or      l
+        ld      hl,t_nomatch
+        jp      z,fail_src_at
+        ld      hl,wlist
+        ld      (w_next),hl
+cm_next:
+        ld      hl,(w_next)
+        ld      a,(hl)
+        or      a
+        jr      z,cm_done
+        call    wild_build
+        ld      hl,sspec
+        ld      (src_spec),hl
+        ld      hl,(dst_base)
+        ld      (dst_spec),hl
+        call    copy_one
+        jr      cm_next
+cm_done:
+        ld      hl,(w_count)
+        dec     hl
+        ld      a,h
+        or      l
+        ret     z               ; just the one
+        inc     hl
+        ld      (tmp8),hl
+        ld      hl,0
+        ld      (tmp8 + 2),hl
+        ld      hl,tmp8
+        call    dec32
+        ld      hl,numbuf
+        call    print
+        ld      hl,t_copied
+        call    print
+        jp      os_crlf
+
+; sspec = the source's directory, then the next name in the list
+wild_build:
+        ld      hl,(src_base)
+        ld      bc,(w_dirlen)
+        ld      de,sspec
+        ld      a,b
+        or      c
+        jr      z,wbd_name
+        ldir
+wbd_name:
+        ld      hl,(w_next)
+wbd_copy:
+        ld      a,(hl)
+        ld      (de),a
+        inc     hl
+        inc     de
+        or      a
+        jr      nz,wbd_copy
+        ld      (w_next),hl
+        ld      hl,sspec + 255  ; (dspec follows: it took the overflow)
+        or      a
+        sbc     hl,de
+        ret     nc
+        ld      hl,t_toolong
+        jp      fail_src_at
+
+;-----------------------------------------------------------------------------
+; One copy: the source at src_spec, the destination at dst_spec
+;-----------------------------------------------------------------------------
+
+copy_one:
+        ld      hl,state
+        ld      b,state_end - state
+        call    clear_mem
+
         ; The source: a URL, or a file
+        ld      hl,(src_spec)
         call    is_url
         ld      (src_url),a
         or      a
@@ -424,6 +569,15 @@ sf_none:
         ld      a,(nstat+2)     ; gone, with nothing left: the end too
         or      a
         jr      z,sf_eof
+        call    wait_more
+        jr      sf_ask
+sf_eof:
+        ld      a,1
+        ld      (src_eof),a
+        ret
+
+; Nothing came: give up if it's been 30 s since wait_t0, else wait a little
+wait_more:
         ld      hl,(TICKS)
         ld      de,(wait_t0)
         or      a
@@ -433,12 +587,7 @@ sf_none:
         sbc     hl,de
         ld      hl,t_nothing
         jp      nc,fail_src_at
-        call    pause
-        jr      sf_ask
-sf_eof:
-        ld      a,1
-        ld      (src_eof),a
-        ret
+        jp      pause
 
 src_close:
         ld      a,(src_state)
@@ -663,12 +812,22 @@ cleanup:
         call    nz,drain
         ld      a,(dir_state)
         or      a
-        jr      z,cu_src_go
+        jr      z,cu_list
         xor     a
         ld      (dir_state),a
         ld      a,(bus_dead)
         or      a
         ld      a,UNIT_DIR
+        call    z,net_close
+cu_list:
+        ld      a,(list_state)
+        or      a
+        jr      z,cu_src_go
+        xor     a
+        ld      (list_state),a
+        ld      a,(bus_dead)
+        or      a
+        ld      a,UNIT_LIST
         call    z,net_close
 cu_src_go:
         ld      a,(src_state)
@@ -877,26 +1036,333 @@ is_alnum:
 local_check:
         ld      d,h
         ld      e,l
-lc_char:
+        push    hl
+        call    has_wild
+        pop     hl
+        or      a
+        jr      z,local_upper
+        ld      hl,t_wild
+        jp      fail_at
+
+; The local spec at HL in capitals
+local_upper:
         ld      a,(hl)
         or      a
         ret     z
-        cp      '*'
-        jr      z,lc_wild
-        cp      '?'
-        jr      z,lc_wild
         cp      'a'
-        jr      c,lc_next
+        jr      c,lu_next
         cp      'z' + 1
-        jr      nc,lc_next
+        jr      nc,lu_next
         sub     0x20
         ld      (hl),a
-lc_next:
+lu_next:
         inc     hl
-        jr      lc_char
-lc_wild:
-        ld      hl,t_wild
-        jp      fail_at
+        jr      local_upper
+
+; A = 1 if the string at HL has a * or a ? in it. Keeps DE.
+has_wild:
+        ld      b,'?'
+        jr      hw_scan
+; A = 1 if it has a * (a ? in a URL is its query)
+has_star:
+        ld      b,'*'
+hw_scan:
+        ld      a,(hl)
+        or      a
+        ret     z
+        inc     hl
+        cp      '*'
+        jr      z,hw_yes
+        cp      b
+        jr      nz,hw_scan
+hw_yes:
+        ld      a,1
+        ret
+
+; A = 1 if the URL at HL is one to list for its *: not HTTP, which has no
+; directories to list (the * is left for url_check to refuse)
+url_wild:
+        push    hl
+        call    is_http
+        pop     hl
+        or      a
+        jp      z,has_star
+        xor     a
+        ret
+
+; HL -> a URL with a * in it: HL = its name, after the last /. The * can be
+; only there.
+url_split:
+        push    hl
+        ld      d,h
+        ld      e,l
+us_scan:
+        ld      a,(hl)
+        or      a
+        jr      z,us_end
+        inc     hl
+        cp      '/'
+        jr      nz,us_scan
+        ld      d,h
+        ld      e,l
+        jr      us_scan
+us_end:
+        pop     hl              ; the URL
+        ld      a,(de)          ; cut it before the name,
+        push    af
+        push    de
+        xor     a
+        ld      (de),a
+        call    has_star
+        pop     de
+        ld      c,a
+        pop     af
+        ld      (de),a          ; and mend it
+        ld      a,c
+        or      a
+        ex      de,hl           ; HL -> the name
+        ret     z
+        ld      hl,t_wilddir
+        jp      fail_src_at
+
+; Many files go to a drive or a directory, or each in turn to a device. A
+; destination of x:*.* or URL/* is cut to the drive or the directory.
+wild_dst:
+        ld      hl,(dst_spec)
+        call    is_url
+        or      a
+        jr      nz,wd_url
+        ld      hl,(dst_spec)
+        call    local_upper
+        ld      hl,(dst_spec)
+        call    os_kind
+        ld      hl,t_baddev
+        jp      c,fail_dst_at
+        cp      K_DISK
+        ret     nz              ; a device
+        ld      hl,(dst_spec)
+        call    local_name
+        ld      a,(hl)
+        or      a
+        ret     z               ; a drive alone
+        cp      '*'
+        jr      nz,wd_bad
+        inc     hl
+        ld      a,(hl)
+        or      a
+        jr      z,wd_lcut
+        cp      '.'
+        jr      nz,wd_bad
+        inc     hl
+        ld      a,(hl)
+        cp      '*'
+        jr      nz,wd_bad
+        inc     hl
+        ld      a,(hl)
+        or      a
+        jr      nz,wd_bad
+wd_lcut:
+        ld      hl,(dst_spec)
+        call    local_name
+        ld      (hl),0
+        ret
+wd_url:
+        ld      hl,(dst_spec)
+wd_scan:
+        ld      a,(hl)
+        or      a
+        jr      z,wd_dir
+        cp      '*'
+        jr      z,wd_star
+        inc     hl
+        jr      wd_scan
+wd_star:
+        dec     hl
+        ld      a,(hl)
+        cp      '/'
+        jr      nz,wd_bad
+        inc     hl              ; the *: alone, or *.*, and the end
+        push    hl
+        inc     hl
+        ld      a,(hl)
+        or      a
+        jr      z,wd_ucut
+        cp      '.'
+        jr      nz,wd_bad_pop
+        inc     hl
+        ld      a,(hl)
+        cp      '*'
+        jr      nz,wd_bad_pop
+        inc     hl
+        ld      a,(hl)
+        or      a
+        jr      nz,wd_bad_pop
+wd_ucut:
+        pop     hl
+        ld      (hl),0
+wd_dir:
+        ld      hl,(dst_spec)
+        call    url_dirlike
+        or      a
+        ret     nz
+wd_bad:
+        ld      hl,t_wilddst
+        jp      fail_dst_at
+wd_bad_pop:
+        pop     hl
+        jr      wd_bad
+
+; A = 1 if the URL at HL ends in / or names only a host
+url_dirlike:
+        ld      d,h
+        ld      e,l
+        call    strend
+        dec     hl
+        ld      a,(hl)
+        cp      '/'
+        jr      z,ud_yes
+        ex      de,hl           ; HL -> the start
+ud_find:
+        ld      a,(hl)
+        or      a
+        jr      z,ud_no         ; no ://
+        inc     hl
+        cp      ':'
+        jr      nz,ud_find
+        ld      a,(hl)
+        cp      '/'
+        jr      nz,ud_find
+        inc     hl
+        ld      a,(hl)
+        cp      '/'
+        jr      nz,ud_find
+ud_host:
+        inc     hl
+        ld      a,(hl)
+        or      a
+        jr      z,ud_yes        ; the host and no more
+        cp      '/'
+        jr      nz,ud_host
+ud_no:
+        xor     a
+        ret
+ud_yes:
+        ld      a,1
+        ret
+
+; HL -> a name: on the list, if it's not on it. w_full if there's no room.
+list_add:
+        ex      de,hl           ; DE -> the name
+        ld      hl,wlist
+la_scan:
+        ld      a,(hl)
+        or      a
+        jr      z,la_new        ; the end of the list
+        push    de
+la_cmp:
+        ld      a,(de)
+        cp      (hl)
+        jr      nz,la_diff
+        inc     hl
+        inc     de
+        or      a
+        jr      nz,la_cmp
+        pop     de              ; the same: it's there
+        ret
+la_diff:
+        pop     de
+la_skip:
+        ld      a,(hl)
+        inc     hl
+        or      a
+        jr      nz,la_skip
+        jr      la_scan
+la_new:
+        ex      de,hl           ; HL -> the name, DE -> the list's end
+        call    strlen
+        inc     bc              ; and its NUL
+        push    hl
+        ld      hl,wlist_end - 1
+        or      a
+        sbc     hl,de
+        or      a
+        sbc     hl,bc
+        pop     hl
+        jr      c,la_full
+        ldir
+        xor     a
+        ld      (de),a          ; an empty name ends the list
+        ld      hl,(w_count)
+        inc     hl
+        ld      (w_count),hl
+        ret
+la_full:
+        ld      a,1
+        ld      (w_full),a
+        ret
+
+; Z if the name at HL matches the pattern at DE: ? is any one character and
+; * any run of them. Both are in capitals.
+wild_match:
+        ld      bc,0
+        ld      (wm_sp),bc
+wm_loop:
+        ld      a,(de)
+        cp      '*'
+        jr      nz,wm_plain
+        inc     de
+        ld      (wm_sp),de      ; the pattern after the *,
+        ld      (wm_ss),hl      ; matching nothing so far
+        jr      wm_loop
+wm_plain:
+        or      a
+        jr      nz,wm_char
+        ld      a,(hl)          ; the pattern's done: and the name?
+        or      a
+        jr      z,wm_yes
+        jr      wm_back
+wm_char:
+        ld      c,a
+        ld      a,(hl)
+        or      a
+        jr      z,wm_no         ; the name's done
+        ld      b,a
+        ld      a,c
+        cp      '?'
+        jr      z,wm_step
+        cp      b
+        jr      nz,wm_back
+wm_step:
+        inc     hl
+        inc     de
+        jr      wm_loop
+wm_back:
+        ld      de,(wm_sp)      ; the last * takes one more
+        ld      a,d
+        or      e
+        jr      z,wm_no
+        ld      hl,(wm_ss)
+        ld      a,(hl)
+        or      a
+        jr      z,wm_no
+        inc     hl
+        ld      (wm_ss),hl
+        jr      wm_loop
+wm_yes:
+        xor     a
+        ret
+wm_no:
+        or      1
+        ret
+
+; B bytes at HL zeroed
+clear_mem:
+        xor     a
+cm_clear:
+        ld      (hl),a
+        inc     hl
+        djnz    cm_clear
+        ret
 
 ; A URL at HL: no * (the FujiNet ends it there)
 url_check:

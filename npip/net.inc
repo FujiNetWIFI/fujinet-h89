@@ -16,6 +16,14 @@ net_open:
         ld      c,CMD_OPEN
         jr      net_spec
 
+; The same, a directory as bare names (translation DIR_RAW)
+net_open_raw:
+        push    af
+        ld      a,DIR_RAW
+        ld      (open_xl),a
+        pop     af
+        jr      net_open
+
 ; A = unit, B = command (CMD_DELETE, CMD_LOCK), HL -> the URL
 net_fsop:
         ld      c,b
@@ -29,8 +37,10 @@ net_spec:
         ld      (req_desc),a
         ld      a,b
         ld      (req_aux),a
-        xor     a
+        ld      a,(open_xl)
         ld      (req_aux+1),a
+        xor     a
+        ld      (open_xl),a
         ld      a,2
         ld      (req_auxn),a
         ld      (req_data),hl
@@ -312,3 +322,144 @@ total_x2:
         inc     hl
         rl      (hl)
         ret
+
+;-----------------------------------------------------------------------------
+; The files a URL with a * names
+;-----------------------------------------------------------------------------
+
+; The source URL opened as a directory on N4, in bare names, a line each.
+; Each line that doesn't end in / (a directory) goes to list_add.
+url_list:
+        ld      a,1             ; (first: a ^C during OPEN still closes it)
+        ld      (list_state),a
+        ld      hl,(TICKS)
+        ld      (wait_t0),hl
+        ld      a,UNIT_LIST
+        ld      b,MODE_DIR
+        ld      hl,(src_spec)
+        call    net_open_raw
+        jr      nz,ul_fail
+ul_next:
+        ld      a,UNIT_LIST
+        call    net_status
+        jr      nz,ul_fail
+        ld      hl,(nstat)
+        ld      a,h
+        or      l
+        jr      z,ul_none
+        ld      de,CHUNK        ; a CHUNK at most
+        or      a
+        sbc     hl,de
+        add     hl,de
+        jr      c,ul_ask
+        ex      de,hl
+ul_ask:
+        ld      a,UNIT_LIST
+        call    net_read
+        jr      nz,ul_refused
+        ld      hl,(TICKS)
+        ld      (wait_t0),hl
+        ld      hl,buf
+        call    ul_parse
+        jr      ul_next
+ul_none:
+        ld      a,(nstat+3)
+        cp      ERR_EOF
+        jr      z,ul_end
+        cp      2               ; 1 is all well
+        jr      nc,ul_fail_a
+        ld      a,(nstat+2)     ; gone, with nothing left: the end too
+        or      a
+        jr      z,ul_end
+        call    wait_more
+        jr      ul_next
+ul_refused:
+        ld      a,UNIT_LIST     ; refused: at the end, or an error
+        call    net_why
+        cp      ERR_EOF
+        jr      z,ul_end
+ul_fail_a:
+        jp      fail_src_neta
+ul_fail:
+        ld      a,UNIT_LIST
+        call    net_why
+        jp      fail_src_neta
+ul_end:
+        ld      hl,lname        ; (a last line with no ending)
+        call    ul_line
+        xor     a
+        ld      (list_state),a
+        ld      a,(bus_dead)
+        or      a
+        ret     nz
+        ld      a,UNIT_LIST
+        jp      net_close
+
+; HL -> BC bytes of the listing: lines into lname, each to ul_line at its end
+ul_parse:
+        ld      a,b
+        or      c
+        ret     z
+        ld      a,(hl)
+        inc     hl
+        dec     bc
+        cp      13
+        jr      z,up_eol
+        cp      10
+        jr      z,up_eol
+        push    hl
+        push    bc
+        call    ul_char
+        pop     bc
+        pop     hl
+        jr      ul_parse
+up_eol:
+        push    hl
+        push    bc
+        call    ul_line
+        pop     bc
+        pop     hl
+        jr      ul_parse
+
+; A to the line so far. A line too long for lname is marked, and left out.
+ul_char:
+        ld      c,a
+        ld      a,(ln_len)
+        cp      LN_MAX
+        jr      nc,uc_over
+        ld      e,a
+        ld      d,0
+        ld      hl,lname
+        add     hl,de
+        ld      (hl),c
+        inc     a
+        ld      (ln_len),a
+        ret
+uc_over:
+        ld      a,LN_MAX + 1
+        ld      (ln_len),a
+        ret
+
+; The line is whole: a name, unless it's a directory (a / at its end)
+ul_line:
+        ld      a,(ln_len)
+        or      a
+        ret     z
+        ld      c,a
+        xor     a
+        ld      (ln_len),a
+        ld      a,c
+        cp      LN_MAX + 1
+        ret     nc              ; too long
+        ld      e,c
+        ld      d,0
+        ld      hl,lname
+        add     hl,de
+        dec     hl
+        ld      a,(hl)
+        cp      '/'
+        ret     z
+        inc     hl
+        ld      (hl),0
+        ld      hl,lname
+        jp      list_add

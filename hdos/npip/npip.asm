@@ -27,6 +27,14 @@ K_DEV           equ     2       ; LP:, AT:, ... named alone
 
 CH_SRC          equ     0       ; the channels
 CH_DST          equ     1
+CH_DIR          equ     2       ; a directory read for a *
+
+DE_LEN          equ     23      ; a directory entry
+DE_PER          equ     22      ; to a directory block
+DE_FREE         equ     0xFF
+DE_END          equ     0xFE
+DE_FLAGS        equ     14
+FL_SYS          equ     0x80    ; a system file: a * doesn't name it
 
 macro SCALL fn
         rst     0x38
@@ -87,6 +95,8 @@ os_usage:
         defm    "  SY1:=TNFS://HOST/DIR/FILE.TXT   to SY1:FILE.TXT", 13, 10
         defm    "  TNFS://HOST/DIR/=SY1:FILE.TXT   to HOST/DIR/FILE.TXT", 13, 10
         defm    "  LP:=SD:/README.TXT              to LP: (TT: the screen)", 13, 10
+        defm    "  SY1:=TNFS://HOST/DIR/*.TXT      every .TXT, to SY1:", 13, 10
+        defm    "  SD:/BAK/=SY1:*.ABS              every .ABS on SY1:, to SD:/BAK/", 13, 10
         defm    "HDOS makes a command line capitals; the * prompt doesn't.", 13, 10, 0
 
 ;-----------------------------------------------------------------------------
@@ -239,6 +249,134 @@ ok_is_done:
 
 t_tt:           defm    "TT"
 t_disks:        defm    "SYDKFN", 0
+
+; HL -> a pattern, in capitals: the names in its device's DIRECT.SYS, a block
+; (22 entries) at a time, that match the part after its colon
+os_wild:
+        ld      d,h
+        ld      e,l
+        push    de
+        call    local_name      ; HL -> the pattern's name
+        ld      (wd_pat),hl
+        pop     de
+        or      a
+        sbc     hl,de           ; HL = the bytes of device in front of it
+        ld      b,h
+        ld      c,l
+        ex      de,hl           ; HL -> the spec
+        ld      de,dspec
+        ld      a,b
+        or      c
+        jr      z,ow_dev
+        ldir
+ow_dev:
+        ld      hl,t_direct     ; dspec = the device's DIRECT.SYS
+        call    strcpy
+        ld      a,CH_DIR
+        ld      hl,dspec
+        ld      de,defaults
+        SCALL   SC_OPENR
+        ret     c
+ow_block:
+        ld      de,buf          ; a block is two sectors
+        call    ow_sector
+        jr      c,ow_over
+        ld      de,buf + 256
+        call    ow_sector
+        jr      c,ow_over
+        call    wild_block
+        jr      nc,ow_block
+ow_close:
+        ld      a,CH_DIR
+        SCALL   SC_CLOSE
+        xor     a
+        ret
+ow_over:
+        cp      EC_EOF
+        jr      z,ow_close
+        push    af              ; a read failed
+        ld      a,CH_DIR
+        SCALL   SC_CLOSE
+        pop     af
+        scf
+        ret
+ow_sector:
+        ld      a,CH_DIR
+        ld      bc,256
+        SCALL   SC_READ
+        ret
+
+; The block at buf: carry when it holds the end of the directory
+wild_block:
+        ld      hl,buf
+        ld      b,DE_PER
+wb_entry:
+        ld      a,(hl)
+        cp      DE_END
+        jr      z,wb_last
+        cp      DE_FREE
+        push    bc
+        push    hl
+        call    nz,wb_one
+        pop     hl
+        ld      de,DE_LEN
+        add     hl,de
+        pop     bc
+        djnz    wb_entry
+        or      a
+        ret
+wb_last:
+        scf
+        ret
+
+; HL -> an entry: its name NAME.EXT to hname; on the list if the pattern
+; matches it. A name with no extension is NAME. to match, and NAME on the list.
+wb_one:
+        push    hl
+        ld      de,DE_FLAGS
+        add     hl,de
+        ld      a,(hl)
+        pop     hl
+        and     FL_SYS
+        ret     nz
+        ld      de,hname
+        ld      b,8
+        call    wb_part
+        ld      a,'.'
+        ld      (de),a
+        inc     de
+        ld      b,3
+        call    wb_part
+        xor     a
+        ld      (de),a
+        ld      hl,hname
+        ld      de,(wd_pat)
+        call    wild_match
+        ret     nz
+        ld      hl,hname
+        call    strend
+        dec     hl
+        ld      a,(hl)
+        cp      '.'
+        jr      nz,wb_add
+        ld      (hl),0
+wb_add:
+        ld      hl,hname
+        jp      list_add
+
+; B characters from HL to DE, up to a NUL (they're padded with them)
+wb_part:
+        ld      a,(hl)
+        inc     hl
+        or      a
+        jr      z,wp_pad
+        cp      ' '
+        jr      z,wp_pad
+        ld      (de),a
+        inc     de
+wp_pad:
+        djnz    wb_part
+        ret
 
 ; HL -> the file to read, on channel 0. Its size: positioned past its end,
 ; HDOS says how many sectors short of there it fell.
@@ -446,6 +584,8 @@ os_errors:
 t_hdoserr:      defm    "HDOS error ", 0
 
 defaults:       defm    "SY0", 0, 0, 0  ; SY0:, no extension
+t_direct:       defm    "DIRECT.SYS", 0
+wd_pat:         defw    0       ; os_wild: the pattern to match
 arg_sp:         defw    0
 con_saved:      defs    5       ; the console's mode bytes at the start
 con_last:       defb    0       ; the last byte to TT:
