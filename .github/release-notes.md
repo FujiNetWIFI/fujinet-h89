@@ -6,6 +6,12 @@ Like v1.0.5, this release is for the card without its 74LVC245 (needs
 FujiNetWIFI/fujinet-firmware#2232). Cards that still have the 245 should stay
 on v1.0.4.
 
+New in v1.0.11: NPIP takes wildcards in the source. `NPIP B:=TNFS://HOST/DIR/*.TXT`
+copies every .TXT in that directory, `NPIP SD:/BAK/=B:A?.COM` every match on a
+disk (HDOS: `SY1:*.ABS`). A local name takes `*` and `?`; a URL only `*`, in its
+last part (HTTP has no directory to list). The destination is a drive or disk, a
+directory URL or a device, and the first copy that fails stops the rest.
+
 New in v1.0.10: `FN.DVD` has the FujiNet mount its slots as soon as the driver
 loads, not only at `MOUNT FNn:`.
 
